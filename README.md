@@ -29,7 +29,17 @@ npm install && npm run build
    - [화재정보서비스](https://www.data.go.kr/data/15077644/openapi.do) · [구급통계서비스](https://www.data.go.kr/data/15099428/openapi.do) · [특정소방대상물정보](https://www.data.go.kr/data/15155780/openapi.do) · [소방시설정보](https://www.data.go.kr/data/15155779/openapi.do)
 2. **법제처** — [open.law.go.kr](https://open.law.go.kr)에서 OPEN API 신청 → `LAW_OC`에
 
-## Claude Desktop / Claude Code 연결
+## 실행 모드 2가지
+
+- **stdio (기본)** — 내 컴퓨터의 Claude Desktop/Claude Code에 연결 (아래 설정)
+- **HTTP** — 서버 1대 띄워두고 여러 사용자가 ChatGPT·Claude 커넥터로 URL만 등록해 사용.
+  배포 절차·운영 옵션은 **[DEPLOY.md](DEPLOY.md)** 참조 (기관 인수인계용 문서)
+
+```bash
+node build/index.js --mode http   # PORT env로 포트 지정 (기본 8080)
+```
+
+## Claude Desktop / Claude Code 연결 (stdio)
 
 ```json
 {

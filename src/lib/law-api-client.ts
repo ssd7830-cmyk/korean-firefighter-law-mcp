@@ -5,6 +5,7 @@
 
 import { fetchWithRetry } from "./fetch-with-retry.js"
 import { parseXml } from "./xml.js"
+import { requestContext } from "./request-context.js"
 import type { CacheStore } from "./cache.js"
 
 // DRF는 정상 파라미터에도 버스트 호출 시 간헐 404를 낸다 → 404 재시도 포함
@@ -19,9 +20,13 @@ export class LawApiClient {
   constructor(private cache: CacheStore) {}
 
   private oc(): string {
-    const key = process.env.LAW_OC
+    // 요청 헤더 키(HTTP 모드) 우선, 없으면 서버 환경변수
+    const key = requestContext.getStore()?.lawOc || process.env.LAW_OC
     if (!key) {
-      throw new Error("LAW_OC가 필요합니다. 법제처(https://open.law.go.kr)에서 OPEN API 인증키를 발급받으세요.")
+      throw new Error(
+        "LAW_OC가 필요합니다. 법제처(https://open.law.go.kr)에서 OPEN API 인증키를 발급받으세요. " +
+          "(HTTP 모드에서는 X-Law-Oc 헤더로도 전달 가능)"
+      )
     }
     return key
   }

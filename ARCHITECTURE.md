@@ -178,6 +178,7 @@ interface CacheStore {
 
 ## 로드맵
 
-- **v0.1 (MVP)**: stdio MCP + 도구 7개 + 인메모리 캐시 + 재시도 방어층
-- **v0.2**: `check_building_compliance` 체인 도구, CLI 인터페이스, 별표/서식(소방청 고시) 조회
-- **v0.3**: Streamable HTTP stateless 서버 (원격 배포), 필요 시 SQLite 캐시
+- **v0.1 (MVP)** ✅: stdio MCP + 도구 7개 + 인메모리 캐시 + 재시도 방어층
+- **v0.3 (HTTP)** ✅: Streamable HTTP stateless 서버 + 요청별 키 격리(AsyncLocalStorage) + Bearer 토큰 보호 + Docker/DEPLOY.md 인수인계 패키지 — ChatGPT·Claude 커넥터 연결 가능
+- **v0.2 (보류)**: `check_building_compliance` 체인 도구, CLI 인터페이스, 별표/서식 조회 — 실데이터 검증(키 발급) 후 진행
+- **이후**: 필요 시 SQLite 캐시 (`CacheStore` 교체)

@@ -5,6 +5,7 @@
 
 import { fetchWithRetry } from "./fetch-with-retry.js"
 import { parseXml } from "./xml.js"
+import { requestContext } from "./request-context.js"
 import type { CacheStore } from "./cache.js"
 
 const BASE = "https://apis.data.go.kr/1661000"
@@ -18,10 +19,12 @@ export class FireApiClient {
   constructor(private cache: CacheStore) {}
 
   private serviceKey(): string {
-    const key = process.env.DATA_GO_KR_KEY
+    // 요청 헤더 키(HTTP 모드) 우선, 없으면 서버 환경변수
+    const key = requestContext.getStore()?.dataGoKrKey || process.env.DATA_GO_KR_KEY
     if (!key) {
       throw new Error(
-        "DATA_GO_KR_KEY가 필요합니다. 공공데이터포털(https://www.data.go.kr)에서 소방청 API 활용신청 후 발급받으세요."
+        "DATA_GO_KR_KEY가 필요합니다. 공공데이터포털(https://www.data.go.kr)에서 소방청 API 활용신청 후 발급받으세요. " +
+          "(HTTP 모드에서는 X-Data-Go-Kr-Key 헤더로도 전달 가능)"
       )
     }
     // 인코딩 키(% 포함)는 그대로, 디코딩 키는 인코딩해서 사용
