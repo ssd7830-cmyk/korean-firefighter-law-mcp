@@ -1,9 +1,9 @@
 # korean-firefighter-law-mcp — 아키텍처 설계
 
-> v0.1 설계 초안 | 2026-08 | 참조 모델: [korean-law-mcp](https://github.com/chrisryugj/korean-law-mcp)
+> v0.1 설계 초안 | 2026-08
 
 소방 데이터 3덩어리(화재·구급 통계 + 소방시설 정보 + 소방 법령)를 AI가 바로 쓸 수 있는
-MCP 도구로 묶는다. korean-law-mcp가 법령 도메인에서 한 것을 소방 도메인에서 한다.
+MCP 도구로 묶는다.
 
 ---
 
@@ -11,11 +11,11 @@ MCP 도구로 묶는다. korean-law-mcp가 법령 도메인에서 한 것을 소
 
 | 결정 | 선택 | 이유 |
 |---|---|---|
-| 언어/런타임 | TypeScript + Node.js | korean-law-mcp와 동일. MCP SDK 성숙도 최고 |
+| 언어/런타임 | TypeScript + Node.js | MCP SDK 성숙도 최고 |
 | 데이터 방식 | **API 실시간 호출** (DB 미배포) | 법령·통계는 원본이 계속 갱신됨. 재배포 책임 없음 |
 | 캐시 | **인메모리 LRU + TTL만** (SQLite 없음) | MVP에 디스크 캐시는 과설계. 단 `CacheStore` 인터페이스로 분리해두고, data.go.kr 일일 호출 한도가 실제 문제 되면 그때 SQLite 구현체로 교체 |
 | 인터페이스 | MCP stdio 우선, HTTP는 2단계 | 로컬 Claude 연동이 1차 목표 |
-| 스키마 검증 | Zod → MCP JSON Schema 변환 | korean-law-mcp 방식 그대로 |
+| 스키마 검증 | Zod → MCP JSON Schema 변환 | 타입 안전 + 런타임 검증 동시 확보 |
 
 ---
 
@@ -72,7 +72,7 @@ LAW_OC=...
 ```
 
 로그인·세션 없음. 두 키 모두 URL 파라미터로 전달 (data.go.kr은 `serviceKey=`, 법제처는 `OC=`).
-로그·에러 메시지에서 키 마스킹 필수 (korean-law-mcp의 `maskSensitiveUrl` 패턴).
+로그·에러 메시지에서 키 마스킹 필수 (`maskSensitiveUrl`).
 
 ---
 
@@ -140,7 +140,7 @@ korean-firefighter-law-mcp/
 └── README.md
 ```
 
-원칙 (korean-law-mcp 계승):
+원칙:
 1. Tools → Shared Libs → API Client 단방향 의존
 2. 파일당 200줄 미만, 단일 책임
 3. 도구는 `{ name, description, schema, handler }`로 `allTools[]`에만 등록
@@ -148,7 +148,7 @@ korean-firefighter-law-mcp/
 
 ---
 
-## 네트워크 방어층 (korean-law-mcp에서 배운 것)
+## 네트워크 방어층
 
 | 문제 | 대응 |
 |---|---|
@@ -169,7 +169,7 @@ interface CacheStore {
 }
 ```
 
-- v0.1: `InMemoryLruCache` (최대 100건, korean-law-mcp cache.ts 이식)
+- v0.1: `InMemoryLruCache` (최대 100건)
 - TTL: 법령 검색 1시간 / 조문 24시간 / 시설정보 24시간 / 과거 연도 확정 통계 7일
 - SQLite는 **일일 호출 한도가 실측으로 문제 될 때만** `SqliteCacheStore`로 추가.
   도구·클라이언트 코드는 인터페이스만 보므로 교체 비용 0

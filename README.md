@@ -1,7 +1,7 @@
 # korean-firefighter-law-mcp
 
 소방청 공공데이터(화재·구급·소방시설)와 법제처 소방 법령·판례를 AI에서 바로 조회하는 MCP 서버.
-소방관계자 실무용. [korean-law-mcp](https://github.com/chrisryugj/korean-law-mcp)의 소방 도메인판.
+소방관계자 실무용.
 
 ## 도구 (7개)
 
