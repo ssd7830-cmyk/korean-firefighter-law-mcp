@@ -3,9 +3,9 @@ import { zodToJsonSchema } from "zod-to-json-schema"
 import { allTools } from "./tool-registry.js"
 
 describe("tool-registry — 등록 무결성", () => {
-  it("도구는 7개, 이름 중복 없음", () => {
-    expect(allTools.length).toBe(7)
-    expect(new Set(allTools.map((t) => t.name)).size).toBe(7)
+  it("도구는 9개, 이름 중복 없음", () => {
+    expect(allTools.length).toBe(9)
+    expect(new Set(allTools.map((t) => t.name)).size).toBe(9)
   })
 
   it("모든 도구에 설명이 있고 스키마가 JSON Schema(object)로 변환된다", () => {

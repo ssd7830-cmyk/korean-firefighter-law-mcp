@@ -54,7 +54,8 @@ function extractLawName(q: string): string | undefined {
 
 function cleanQuery(q: string): string {
   return q
-    .replace(/판례|검색|조회|알려\s*줘|보여\s*줘|찾아\s*줘|해\s*줘|주세요|입니까|인가요|[?？.!]/g, "")
+    .replace(/관련된?|에\s*대해서?|판례|검색|조회|알려\s*줘|보여\s*줘|찾아\s*줘|해\s*줘|주세요|입니까|인가요|[?？.!]/g, "")
+    .replace(/\s+/g, " ")
     .trim()
 }
 
@@ -64,6 +65,17 @@ export function routeQuestion(q: string): RoutedQuery {
 
   if (/판례|판결|재판/.test(q)) {
     return { tool: "search_fire_precedents", args: { query: cleanQuery(q) || q } }
+  }
+  if (/화재안전기준|화재안전성능기준|화재안전기술기준|NFPC|NFTC|행정규칙|고시|훈령/i.test(q)) {
+    return { tool: "search_fire_admin_rules", args: { query: cleanQuery(q) || q } }
+  }
+  // 법령명(위험물안전관리법 등)이 잡혔으면 법령 질문이므로 위험물 물질 검색으로 보내지 않는다
+  if (!law && /위험물|CAS\s*번호|UN\s*번호/i.test(q)) {
+    const query = cleanQuery(q)
+      .replace(/위험물|물질|여부|인지|이야|맞아|CAS\s*번호|UN\s*번호/gi, "")
+      .replace(/\s+/g, " ")
+      .trim()
+    if (query) return { tool: "search_hazmat", args: { query } }
   }
   if (law && jo) {
     return { tool: "get_fire_law_text", args: { lawName: law, jo } }

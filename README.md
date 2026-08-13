@@ -3,7 +3,7 @@
 소방청 공공데이터(화재·구급·소방시설)와 법제처 소방 법령·판례를 AI에서 바로 조회하는 MCP 서버.
 소방관계자 실무용.
 
-## 도구 (7개)
+## 도구 (9개)
 
 | 도구 | 하는 일 | 데이터 출처 |
 |---|---|---|
@@ -14,6 +14,10 @@
 | `search_fire_law` | 소방 관계 법령 검색 (약칭 지원) | 법제처 국가법령정보 |
 | `get_fire_law_text` | 조문 전문 조회 (`"소방시설법" 제10조` 등) | 법제처 국가법령정보 |
 | `search_fire_precedents` | 소방 관련 판례 검색 | 법제처 국가법령정보 |
+| `search_fire_admin_rules` | 행정규칙(고시·훈령) 검색 — 화재안전기준(NFPC·NFTC) 등 | 법제처 국가법령정보 |
+| `search_hazmat` | 위험물 검색 (물질명·CAS·UN) — 품명·물성·대응요령 | 소방청 국가위험물정보 |
+
+법령·행정규칙 검색은 이름 일치가 없으면 **조문 본문 검색으로 자동 폴백**합니다 ("방화문 설치 기준" 같은 내용 질문 대응).
 
 법령 약칭 내장: 화재예방법 → 화재의 예방 및 안전관리에 관한 법률, 소방시설법·위험물법·119법·다중이용업소법 등.
 
@@ -25,8 +29,8 @@ npm install && npm run build
 
 ## 인증키 (2개, 모두 무료)
 
-1. **공공데이터포털** — [data.go.kr](https://www.data.go.kr) 가입 후 아래 4개 API 활용신청 → 마이페이지의 인증키를 `DATA_GO_KR_KEY`에
-   - [화재정보서비스](https://www.data.go.kr/data/15077644/openapi.do) · [구급통계서비스](https://www.data.go.kr/data/15099428/openapi.do) · [특정소방대상물정보](https://www.data.go.kr/data/15155780/openapi.do) · [소방시설정보](https://www.data.go.kr/data/15155779/openapi.do)
+1. **공공데이터포털** — [data.go.kr](https://www.data.go.kr) 가입 후 아래 5개 API 활용신청 → 마이페이지의 인증키를 `DATA_GO_KR_KEY`에
+   - [화재정보서비스](https://www.data.go.kr/data/15077644/openapi.do) · [구급통계서비스](https://www.data.go.kr/data/15099428/openapi.do) · [특정소방대상물정보](https://www.data.go.kr/data/15155780/openapi.do) · [소방시설정보](https://www.data.go.kr/data/15155779/openapi.do) · [국가위험물정보](https://www.data.go.kr/data/15061055/openapi.do)
 2. **법제처** — [open.law.go.kr](https://open.law.go.kr)에서 OPEN API 신청 → `LAW_OC`에
 
 ## 실행 모드 2가지
@@ -62,10 +66,9 @@ node build/index.js --mode http   # PORT env로 포트 지정 (기본 8080)
 }
 ```
 
-## 알려진 미확인 사항
+## 알려진 제한
 
-- 특정소방대상물 2개 서비스의 **오퍼레이션명**은 활용신청 후 받는 활용가이드 문서 기준으로 확정해야 한다.
-  404가 나면 [src/tools/fire-building.ts](src/tools/fire-building.ts) 상단 상수(또는 env `FIRE_BUILDING_OP` / `FIRE_FACILITY_OP`)를 가이드의 오퍼레이션명으로 교체.
+- 소방청 5개 API·법제처 API 전부 실호출 검증 완료 (2026-08-13). 특정소방대상물 오퍼레이션명은 활용가이드 문서로 확정했으며, 계정에 따라 다르면 env `FIRE_BUILDING_OP` / `FIRE_FACILITY_OP`로 교체 가능.
 - 구급통계는 현재 "교통사고 구급활동" 오퍼레이션만 연결됨 (서비스에 오퍼레이션이 더 있음).
 
 ## 참고

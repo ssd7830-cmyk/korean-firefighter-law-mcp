@@ -62,3 +62,10 @@ export function toJoCode(jo: string): string {
   const branch = (m[2] ?? "0").padStart(2, "0")
   return main + branch
 }
+
+/** "10" | "제10조" | "10의2" → 표시용 "제10조" | "제10조의2". 해석 불가면 입력 그대로 */
+export function joLabel(jo: string): string {
+  const cleaned = jo.replace(/\s+/g, "").replace(/^제/, "").replace(/조(?=의|$)/, "")
+  const m = cleaned.match(/^(\d+)(?:의(\d+))?$/)
+  return m ? `제${m[1]}조${m[2] ? `의${m[2]}` : ""}` : jo
+}

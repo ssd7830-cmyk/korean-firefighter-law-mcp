@@ -20,6 +20,8 @@ import {
 } from "./tools/fire-building.js"
 import { searchFireLaw, SearchFireLawSchema, getFireLawText, GetFireLawTextSchema } from "./tools/fire-law.js"
 import { searchFirePrecedents, SearchFirePrecedentsSchema } from "./tools/fire-precedents.js"
+import { searchFireAdminRules, SearchFireAdminRulesSchema } from "./tools/fire-admin-rules.js"
+import { searchHazmat, SearchHazmatSchema } from "./tools/hazmat.js"
 
 export interface Clients {
   fire: FireApiClient
@@ -75,6 +77,20 @@ export const allTools: McpTool[] = [
     description: "소방 관련 판례 검색 (법제처). 소방시설·위험물·소방공무원 관련 재판례",
     schema: SearchFirePrecedentsSchema,
     handler: (c, a) => searchFirePrecedents(c.law, SearchFirePrecedentsSchema.parse(a)),
+  },
+  {
+    name: "search_fire_admin_rules",
+    description:
+      "소방 행정규칙(고시·훈령) 검색 (법제처). 스프링클러·경보설비 등 소방시설 설치 기준의 본체인 화재안전성능기준(NFPC)·화재안전기술기준(NFTC)이 여기 있음",
+    schema: SearchFireAdminRulesSchema,
+    handler: (c, a) => searchFireAdminRules(c.law, SearchFireAdminRulesSchema.parse(a)),
+  },
+  {
+    name: "search_hazmat",
+    description:
+      "위험물안전관리법상 위험물 검색 (소방청 국가위험물정보). 물질명·CAS번호·UN번호로 품명(류별)·물성·사용용도 조회",
+    schema: SearchHazmatSchema,
+    handler: (c, a) => searchHazmat(c.fire, SearchHazmatSchema.parse(a)),
   },
 ]
 

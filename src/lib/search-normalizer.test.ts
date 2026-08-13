@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { resolveFireLawAlias, toJoCode, FIRE_LAWS } from "./search-normalizer.js"
+import { joLabel, resolveFireLawAlias, toJoCode, FIRE_LAWS } from "./search-normalizer.js"
 
 describe("resolveFireLawAlias", () => {
   it("약칭을 정식 명칭으로 변환한다", () => {
@@ -37,6 +37,19 @@ describe("toJoCode", () => {
 
   it("해석 불가 형식은 명확한 에러", () => {
     expect(() => toJoCode("십조")).toThrow("조번호 형식")
+  })
+})
+
+describe("joLabel", () => {
+  it("조번호 입력 형식과 무관하게 표시는 '제N조(의M)'로 통일한다", () => {
+    expect(joLabel("10")).toBe("제10조")
+    expect(joLabel("제10조")).toBe("제10조")
+    expect(joLabel("10의2")).toBe("제10조의2")
+    expect(joLabel("제 10 조")).toBe("제10조")
+  })
+
+  it("해석 불가 형식은 입력 그대로 반환한다", () => {
+    expect(joLabel("십조")).toBe("십조")
   })
 })
 

@@ -1,7 +1,8 @@
 /**
  * 챗봇 파이프라인 — 할루시네이션 차단 구조
  *
- * 질문 → ① 무조건 조회 (코드가 강제, AI 판단 개입 없음)
+ * 질문 → ⓪ 라우팅: LLM 있으면 LLM이 도구·인자 선택 (실패 시 규칙 라우터 폴백), 없으면 규칙
+ *       → ① 무조건 조회 (자료는 API에서만 — LLM은 도구 선택만 할 뿐 자료를 만들 수 없다)
  *       → ② 조회 결과를 LLM에 자료로 전달, "자료 안에서만 답하라" 강제
  *       → ③ LLM 키 없으면 조회 결과 원문 그대로 반환 (조회 모드)
  *
@@ -10,6 +11,7 @@
 
 import { allTools, type Clients } from "../tool-registry.js"
 import { routeQuestion } from "./query-router.js"
+import { llmRoute } from "./llm-router.js"
 import type { LlmAdapter } from "./llm-adapter.js"
 
 export interface ChatResult {
@@ -32,7 +34,7 @@ export async function handleChat(
   clients: Clients,
   adapter: LlmAdapter | null
 ): Promise<ChatResult> {
-  const route = routeQuestion(message)
+  const route = (adapter ? await llmRoute(message, adapter) : null) ?? routeQuestion(message)
   const tool = allTools.find((t) => t.name === route.tool)
   if (!tool) {
     return { answer: "질문을 처리할 도구를 찾지 못했습니다.", mode: "lookup", tool: "none" }

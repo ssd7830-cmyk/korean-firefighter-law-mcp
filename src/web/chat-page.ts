@@ -17,8 +17,12 @@ export const CHAT_PAGE_HTML = `<!doctype html>
   #newChat { background:transparent; border:1px solid #444; color:var(--text); border-radius:8px; padding:10px; cursor:pointer; text-align:left; font-size:14px; }
   #newChat:hover { background:#2a2a2a; }
   #convList { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
-  .conv { padding:8px 10px; border-radius:8px; font-size:13px; color:var(--sub); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .conv { padding:8px 10px; border-radius:8px; font-size:13px; color:var(--sub); cursor:pointer; display:flex; align-items:center; gap:4px; }
+  .conv span { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .conv:hover, .conv.active { background:#2a2a2a; color:var(--text); }
+  .conv .del { display:none; background:none; border:none; color:var(--sub); cursor:pointer; font-size:12px; padding:0 2px; flex-shrink:0; }
+  .conv:hover .del, .conv.active .del { display:block; }
+  .conv .del:hover { color:var(--text); }
   #brand { font-size:12px; color:var(--sub); padding:8px 4px; border-top:1px solid #333; }
   #main { flex:1; display:flex; flex-direction:column; min-width:0; }
   #chat { flex:1; overflow-y:auto; padding:24px 0; }
@@ -80,8 +84,16 @@ function renderList() {
   convs.forEach((c, i) => {
     const d = document.createElement("div");
     d.className = "conv" + (current === i ? " active" : "");
-    d.textContent = c.title;
+    const t = document.createElement("span"); t.textContent = c.title;
+    const x = document.createElement("button"); x.className = "del"; x.textContent = "✕"; x.title = "대화 삭제";
+    x.onclick = (e) => {
+      e.stopPropagation();
+      convs.splice(i, 1);
+      if (current === i) current = null; else if (current > i) current--;
+      save(); renderList(); renderConv();
+    };
     d.onclick = () => { current = i; renderConv(); renderList(); };
+    d.appendChild(t); d.appendChild(x);
     convList.appendChild(d);
   });
 }

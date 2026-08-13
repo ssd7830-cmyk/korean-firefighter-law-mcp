@@ -26,6 +26,29 @@ describe("routeQuestion — 질문이 반드시 올바른 조회로 이어진다
     expect(String(r.args.query)).toContain("소방시설 점검")
   })
 
+  it("위험물 질문 → 물질 검색 (군더더기 제거 후 물질명만)", () => {
+    const r = routeQuestion("아세톤 위험물이야?")
+    expect(r.tool).toBe("search_hazmat")
+    expect(r.args.query).toBe("아세톤")
+  })
+
+  it("위험물'법' 질문은 물질 검색이 아니라 법령으로 간다", () => {
+    const r = routeQuestion("위험물안전관리법 제5조 알려줘")
+    expect(r.tool).toBe("get_fire_law_text")
+    expect(r.args.lawName).toBe("위험물안전관리법")
+  })
+
+  it("화재안전기준·고시 → 행정규칙 검색", () => {
+    const r = routeQuestion("스프링클러 화재안전기준 알려줘")
+    expect(r.tool).toBe("search_fire_admin_rules")
+    expect(String(r.args.query)).toContain("스프링클러")
+  })
+
+  it("군더더기 단어(관련·에 대해)는 검색어에서 뺀다 — 0건 방지", () => {
+    expect(routeQuestion("소방 관련 판례 찾아줘").args.query).toBe("소방")
+    expect(routeQuestion("화재 판례에 대해 알려줘").args.query).toBe("화재")
+  })
+
   it("화재 + 날짜 → 화재통계 (한국어 날짜)", () => {
     const r = routeQuestion("2025년 1월 3일 화재 몇 건이야?")
     expect(r.tool).toBe("search_fire_stats")

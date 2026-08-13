@@ -1,6 +1,6 @@
 import { z } from "zod"
 import type { LawApiClient } from "../lib/law-api-client.js"
-import { FIRE_LAWS, resolveFireLawAlias, toJoCode } from "../lib/search-normalizer.js"
+import { FIRE_LAWS, joLabel, resolveFireLawAlias, toJoCode } from "../lib/search-normalizer.js"
 import { toArray } from "../lib/xml.js"
 import { truncate } from "../lib/format.js"
 import { textResult, type ToolResult } from "../lib/errors.js"
@@ -23,8 +23,15 @@ export async function searchFireLaw(client: LawApiClient, args: SearchFireLawInp
     )
   }
   const query = resolveFireLawAlias(args.query)
-  const parsed = await client.search("law", query, { display: String(args.display) })
-  const laws = toArray<any>(parsed?.LawSearch?.law)
+  let parsed = await client.search("law", query, { display: String(args.display) })
+  let laws = toArray<any>(parsed?.LawSearch?.law)
+  let byText = false
+  if (laws.length === 0) {
+    // 법령 "이름"에 없으면 조문 본문 검색으로 폴백 ("방화문 설치 기준" 같은 내용 질문)
+    parsed = await client.search("law", query, { display: String(args.display), search: "2" })
+    laws = toArray<any>(parsed?.LawSearch?.law)
+    byText = true
+  }
   if (laws.length === 0) {
     return textResult(`"${query}" 검색 결과 없음. 정식 법령명이나 약칭(화재예방법, 소방시설법 등)으로 다시 시도하세요.`)
   }
@@ -32,7 +39,10 @@ export async function searchFireLaw(client: LawApiClient, args: SearchFireLawInp
     (l, i) =>
       `${i + 1}. ${l.법령명한글} [MST:${l.법령일련번호}] 소관:${l.소관부처명 ?? "-"} 시행:${l.시행일자 ?? "-"}`
   )
-  return textResult(`법령 검색 — "${query}" (${laws.length}건)\n${lines.join("\n")}\n💡 조문 조회: get_fire_law_text(lawName 또는 mst)`)
+  const head = byText
+    ? `법령 검색 — "${query}" 이름 일치 없음 → 조문 내용 검색 (${laws.length}건)`
+    : `법령 검색 — "${query}" (${laws.length}건)`
+  return textResult(`${head}\n${lines.join("\n")}\n💡 조문 조회: get_fire_law_text(lawName 또는 mst)`)
 }
 
 export const GetFireLawTextSchema = z.object({
@@ -87,6 +97,6 @@ export async function getFireLawText(client: LawApiClient, args: GetFireLawTextI
   for (const unit of units) collectText(unit, out)
   if (out.length === 0) return textResult(`${lawTitle} — 조문 내용을 찾지 못했습니다. jo 파라미터를 빼고 다시 시도하세요.`)
 
-  const header = `${law?.기본정보?.법령명_한글 ?? lawTitle}${args.jo ? ` ${args.jo}` : ""}`
+  const header = `${law?.기본정보?.법령명_한글 ?? lawTitle}${args.jo ? ` ${joLabel(args.jo)}` : ""}`
   return textResult(truncate(`${header}\n\n${out.join("\n")}`))
 }

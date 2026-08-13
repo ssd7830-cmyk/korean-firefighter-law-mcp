@@ -1,6 +1,6 @@
 {
   "name": "korean-firefighter-law-mcp",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "소방청 공공데이터(화재·구급·소방시설) + 법제처 소방 법령·판례를 MCP 도구로 제공. 소방관계자 실무용",
   "type": "module",
   "main": "build/index.js",

@@ -5,14 +5,13 @@ import { formatBody, filterBodyByKeyword } from "../lib/format.js"
 import { textResult, type ToolResult } from "../lib/errors.js"
 
 /**
- * [미확인] 특정소방대상물 2개 서비스의 정확한 오퍼레이션명은 data.go.kr 활용신청 후
- * 내려받는 활용가이드 문서에만 있다. 404가 나면 가이드의 오퍼레이션명으로
- * 아래 상수만 교체하면 된다. (서비스 경로는 safeland.go.kr 공개 페이지 기준)
+ * 오퍼레이션명은 활용가이드 문서(2026-08-13 다운로드)로 확정, 실호출 검증 완료.
+ * 기관 계정 등에서 다르면 env FIRE_BUILDING_OP / FIRE_FACILITY_OP로 교체 가능.
  */
 const BUILDING_SERVICE = "SpecificFireObjectInfoService"
-const BUILDING_OP = process.env.FIRE_BUILDING_OP || "getSpecificFireObjectInfo"
-const FACILITY_SERVICE = "SpecificFireObjectFireFacilityInfoService"
-const FACILITY_OP = process.env.FIRE_FACILITY_OP || "getSpecificFireObjectFireFacilityInfo"
+const BUILDING_OP = process.env.FIRE_BUILDING_OP || "getAccomList"
+const FACILITY_SERVICE = "SpecificFireObjectFirefightingSysInfoService"
+const FACILITY_OP = process.env.FIRE_FACILITY_OP || "getAccomFirefightingSysList"
 
 export const SearchFireBuildingSchema = z.object({
   sido: z.string().min(1).describe("시도명 (예: 서울특별시, 경기도)"),

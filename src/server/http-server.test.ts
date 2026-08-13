@@ -53,9 +53,9 @@ describe("HTTP 모드 — stateless MCP 서버", () => {
     expect(json.result.serverInfo.name).toBe("korean-firefighter-law-mcp")
   })
 
-  it("tools/list가 도구 7개를 반환한다 (사전 initialize 없는 독립 요청)", async () => {
+  it("tools/list가 도구 9개를 반환한다 (사전 initialize 없는 독립 요청)", async () => {
     const json = await postMcp(rpc(2, "tools/list", {}))
-    expect(json.result.tools.length).toBe(7)
+    expect(json.result.tools.length).toBe(9)
   })
 
   it("GET은 405 (stateless — SSE 스트림 미지원)", async () => {

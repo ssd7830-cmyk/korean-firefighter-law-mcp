@@ -50,12 +50,25 @@ describe("chat-pipeline — 무조건 조회 구조", () => {
     expect(result.answer).toContain("소방기본법")
   })
 
-  it("조회 자체가 실패하면 오류 안내를 반환하고 LLM은 호출하지 않는다", async () => {
+  it("조회 자체가 실패하면 오류 안내를 반환하고, 자료 없는 답변 생성 호출은 없다", async () => {
     delete process.env.LAW_OC // 키 없음 → 조회 실패
-    const generate = vi.fn()
+    const generate = vi.fn(async () => "{}")
     const result = await handleChat("소방기본법 검색", createClients(), { name: "x", generate })
     expect(result.answer).toContain("LAW_OC")
-    expect(generate).not.toHaveBeenCalled() // 자료 없이 답변 생성 경로 차단
+    // 라우팅 호출은 허용 — 단 [조회된 자료] 없이 답변을 생성하는 호출은 없어야 한다
+    for (const call of generate.mock.calls) expect(String(call[1])).not.toContain("[조회된 자료]")
+  })
+
+  it("LLM 라우터가 도구를 고르면 그 도구로 조회한다 (개떡→찰떡 라우팅)", async () => {
+    const fake: LlmAdapter = {
+      name: "fake",
+      generate: async (system) =>
+        system.includes("라우터")
+          ? '{"tool":"search_fire_precedents","args":{"query":"소방"}}'
+          : "자료 기반 답변. 출처: 판례",
+    }
+    const result = await handleChat("아무렇게나 쓴 질문", createClients(), fake)
+    expect(result.tool).toBe("search_fire_precedents")
   })
 })
 

@@ -87,3 +87,59 @@ describe("FireApiClient — 의도: 키 처리·오류 안내·캐시 정책", (
     )
   })
 })
+
+describe("FireApiClient — 응답 변형 흡수 (위험물 서비스)", () => {
+  beforeEach(() => {
+    process.env.DATA_GO_KR_KEY = "testkey"
+  })
+  afterEach(() => {
+    delete process.env.DATA_GO_KR_KEY
+    vi.unstubAllGlobals()
+  })
+
+  it("response 래퍼 없음 + items 배열 + resultCode '0'도 정상 파싱한다", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              header: { resultCode: "0", resultMsg: "NORMAR_SERVICE" },
+              body: { items: [{ chemicalname: "아세톤" }], totalCount: 1 },
+            }),
+            { status: 200 }
+          )
+      )
+    )
+    const body = await new FireApiClient(new InMemoryLruCache()).call("materialInfoSvc", "getMaterialList", {}, 1000)
+    expect((body.items as any).item[0].chemicalname).toBe("아세톤")
+  })
+})
+
+describe("FireApiClient — 상세 조회 단수 item 변형", () => {
+  beforeEach(() => {
+    process.env.DATA_GO_KR_KEY = "testkey"
+  })
+  afterEach(() => {
+    delete process.env.DATA_GO_KR_KEY
+    vi.unstubAllGlobals()
+  })
+
+  it("body.item(단수)도 items.item으로 통일한다", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              header: { resultCode: "0" },
+              body: { item: { casno: "67-64-1", boilingpoint: "56 ℃" } },
+            }),
+            { status: 200 }
+          )
+      )
+    )
+    const body = await new FireApiClient(new InMemoryLruCache()).call("materialInfoSvc", "getMaterialInfo", {}, 1000)
+    expect((body.items as any).item.casno).toBe("67-64-1")
+  })
+})

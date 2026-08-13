@@ -9,11 +9,12 @@
 | `DATA_GO_KR_KEY` | [공공데이터포털](https://www.data.go.kr) | 회원가입 → 아래 4개 API "활용신청" → 마이페이지에서 인증키 확인 |
 | `LAW_OC` | [법제처 국가법령정보 공동활용](https://open.law.go.kr) | OPEN API 신청 → 인증키(OC) 확인 |
 
-활용신청할 소방청 API 4개:
+활용신청할 소방청 API 5개:
 [화재정보서비스](https://www.data.go.kr/data/15077644/openapi.do) ·
 [구급통계서비스](https://www.data.go.kr/data/15099428/openapi.do) ·
 [특정소방대상물정보](https://www.data.go.kr/data/15155780/openapi.do) ·
-[특정소방대상물소방시설정보](https://www.data.go.kr/data/15155779/openapi.do)
+[특정소방대상물소방시설정보](https://www.data.go.kr/data/15155779/openapi.do) ·
+[국가위험물정보](https://www.data.go.kr/data/15061055/openapi.do)
 
 ## 1. 배포 — 셋 중 하나 선택
 
@@ -84,8 +85,9 @@ DATA_GO_KR_KEY="발급키" LAW_OC="발급OC" node build/index.js --mode http
 - **호출 한도**: 공공데이터포털 개발계정은 API별 일 1천~1만 건. 사용자가 늘면 data.go.kr에 **활용사례 등록 후 운영계정 트래픽 증설**을 신청하세요.
 - **개인 키 모드**: 공용 한도가 부족하면, 사용자가 각자 발급한 키를 요청 헤더 `X-Data-Go-Kr-Key` / `X-Law-Oc`로 보내게 할 수 있습니다 (서버 env 키보다 우선 적용).
 
-## 5. 처음 켠 뒤 확인할 것 (중요)
+## 5. 처음 켠 뒤 확인할 것
 
-특정소방대상물 2개 API의 **오퍼레이션명**은 활용신청 후 받는 활용가이드 문서로 확정해야 합니다.
-`search_fire_building` 호출이 404를 반환하면, 가이드 문서의 오퍼레이션명을 확인해
-환경변수 `FIRE_BUILDING_OP` / `FIRE_FACILITY_OP`로 지정하세요 (코드 수정 불필요).
+모든 API의 오퍼레이션명·파라미터는 활용가이드 문서 기준으로 확정되어 실호출 검증까지 끝난 상태입니다 (2026-08-13).
+혹시 계정·시점에 따라 특정소방대상물 오퍼레이션명이 다르면 환경변수
+`FIRE_BUILDING_OP` / `FIRE_FACILITY_OP`로 교체할 수 있습니다 (코드 수정 불필요).
+켠 직후 챗봇에서 "소방시설법 제10조", "2025년 1월 1일 화재 현황", "아세톤 위험물이야?" 세 가지를 던져보면 법제처·통계·위험물 연동이 한 번에 확인됩니다.

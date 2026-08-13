@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from "vitest"
 import { searchFireStats, SearchFireStatsSchema } from "./fire-stats.js"
 import { getEmsStats } from "./ems-stats.js"
-import { getBuildingFacilities } from "./fire-building.js"
+import { getBuildingFacilities, searchFireBuilding } from "./fire-building.js"
 import { searchFireLaw, getFireLawText } from "./fire-law.js"
 import { searchFirePrecedents } from "./fire-precedents.js"
+import { searchFireAdminRules } from "./fire-admin-rules.js"
+import { searchHazmat } from "./hazmat.js"
 
 function fakeFireClient(items: unknown[]) {
   return {
@@ -29,6 +31,16 @@ describe("도구 핸들러 — 의도: API 파라미터 매핑이 스펙과 일�
     expect(op).toBe("getTrafficAccidentEmgActStats")
     expect(params.sidoHqOgidNm).toBe("서울소방재난본부")
     expect(params.rcptYm).toBe("202501")
+  })
+
+  it("건물·시설 도구는 활용가이드로 확정된 서비스·오퍼레이션을 호출한다", async () => {
+    const client = fakeFireClient([{}])
+    await searchFireBuilding(client, { sido: "서울특별시", pageNo: 1, numOfRows: 50 })
+    expect(client.call.mock.calls[0][0]).toBe("SpecificFireObjectInfoService")
+    expect(client.call.mock.calls[0][1]).toBe("getAccomList")
+    await getBuildingFacilities(client, { sido: "서울특별시", pageNo: 1, numOfRows: 50 })
+    expect(client.call.mock.calls[1][0]).toBe("SpecificFireObjectFirefightingSysInfoService")
+    expect(client.call.mock.calls[1][1]).toBe("getAccomFirefightingSysList")
   })
 
   it("get_building_facilities는 buildingName으로 결과를 좁히고 건수도 갱신한다", async () => {
@@ -113,5 +125,83 @@ describe("의도: 오류·경계 안내 (빨간불 사냥 2차)", () => {
     } as any
     const result = await searchFireLaw(client, { query: "소방기본법", display: 20 })
     expect(result.content[0].text).toContain("1. 소방기본법")
+  })
+})
+
+describe("의도: 내용 질문도 답이 나온다 (본문검색 폴백)", () => {
+  it("법령 이름 검색 0건이면 본문검색(search=2)으로 재시도한다", async () => {
+    const client = {
+      search: vi
+        .fn()
+        .mockResolvedValueOnce({ LawSearch: {} }) // 이름 검색 0건
+        .mockResolvedValueOnce({
+          LawSearch: { law: { 법령명한글: "건축물의 피난ㆍ방화구조 등의 기준에 관한 규칙", 법령일련번호: "9" } },
+        }),
+    } as any
+    const result = await searchFireLaw(client, { query: "방화문 설치 기준", display: 20 })
+    expect(client.search.mock.calls[1][2].search).toBe("2") // 2차 호출이 본문검색
+    expect(result.content[0].text).toContain("조문 내용 검색")
+    expect(result.content[0].text).toContain("피난ㆍ방화구조")
+  })
+
+  it("행정규칙 검색 — 이름 매칭이 나오면 목록으로 반환한다", async () => {
+    const client = {
+      search: vi.fn(async () => ({
+        AdmRulSearch: {
+          admrul: [
+            { 행정규칙명: "스프링클러설비의 화재안전성능기준(NFPC 103)", 행정규칙종류: "고시", 소관부처명: "국립소방연구원", 발령일자: "20241201" },
+          ],
+        },
+      })),
+    } as any
+    const result = await searchFireAdminRules(client, { query: "스프링클러", display: 20 })
+    expect(client.search.mock.calls[0][0]).toBe("admrul")
+    expect(result.content[0].text).toContain("NFPC 103")
+  })
+
+  it("행정규칙 검색도 이름 0건이면 본문검색으로 폴백한다", async () => {
+    const client = {
+      search: vi
+        .fn()
+        .mockResolvedValueOnce({ AdmRulSearch: {} })
+        .mockResolvedValueOnce({
+          AdmRulSearch: { admrul: { 행정규칙명: "건축물 방화구획 적용 지침", 행정규칙종류: "훈령" } },
+        }),
+    } as any
+    const result = await searchFireAdminRules(client, { query: "방화문", display: 20 })
+    expect(client.search.mock.calls[1][2].search).toBe("2")
+    expect(result.content[0].text).toContain("본문 검색")
+  })
+})
+
+describe("위험물 도구 — 목록 매칭 + 상세 조회", () => {
+  const LIST = {
+    items: {
+      item: [
+        { chemicalname: "아세톤", casno: "67-64-1", hazardmaterialclass: "제4류 인화성액체", unno: "1090" },
+        { chemicalname: "아세톤 알코올", casno: "123-42-2", hazardmaterialclass: "제4류" },
+      ],
+    },
+    totalCount: 2,
+  }
+
+  it("정확한 물질명이면 CAS 번호로 상세(getMaterialInfo)를 조회한다", async () => {
+    const client = {
+      call: vi
+        .fn()
+        .mockResolvedValueOnce(LIST)
+        .mockResolvedValueOnce({ items: { item: [{ chemicalname: "아세톤", usepurpose: "용제" }] }, totalCount: 1 }),
+    } as any
+    const result = await searchHazmat(client, { query: "아세톤", display: 10 })
+    expect(client.call.mock.calls[1][1]).toBe("getMaterialInfo")
+    expect(client.call.mock.calls[1][2].casNo).toBe("67-64-1")
+    expect(result.content[0].text).toContain("위험물 상세 — 아세톤")
+  })
+
+  it("복수 매칭이면 품명·CAS가 담긴 목록을 반환한다", async () => {
+    const client = { call: vi.fn(async () => LIST) } as any
+    const result = await searchHazmat(client, { query: "아세", display: 10 })
+    expect(result.content[0].text).toContain("2건")
+    expect(result.content[0].text).toContain("제4류 인화성액체")
   })
 })

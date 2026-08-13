@@ -46,6 +46,9 @@ export class FireApiClient {
     const cached = this.cache.get<DataGoKrBody>(cacheKey)
     if (cached) return cached
 
+    // resultType=xml 강제 — json 모드는 일부 서비스가 빈 결과를 반환한다 (2026-08-13 실측).
+    // 단 위험물(materialInfoSvc)처럼 xml을 요청해도 JSON으로 답하는 서비스가 있어 아래에서 둘 다 파싱한다.
+    qs.set("resultType", "xml")
     const url = `${BASE}/${service}/${operation}?serviceKey=${this.serviceKey()}&${qs.toString()}`
     const response = await fetchWithRetry(url, { retryOn: [429, 500, 503, 504] })
     const text = await response.text()
@@ -74,15 +77,19 @@ export class FireApiClient {
     } catch {
       throw new Error(`API가 해석할 수 없는 응답을 반환했습니다: ${operation}. 일시 장애일 수 있으니 잠시 후 다시 시도하세요.`)
     }
-    return this.checkAndCache(json?.response, cacheKey, ttlMs)
+    // 위험물 등 일부 서비스는 response 래퍼 없이 {header, body}를 바로 반환한다
+    return this.checkAndCache(json?.response ?? json, cacheKey, ttlMs)
   }
 
   private checkAndCache(resp: any, cacheKey: string, ttlMs: number): DataGoKrBody {
     const code = resp?.header?.resultCode
-    if (code !== undefined && code !== "00" && code !== 0) {
+    if (code !== undefined && code !== "00" && code !== "0" && code !== 0) {
       throw new Error(`API 오류 ${code}: ${resp?.header?.resultMsg || "원인 미상"}`)
     }
-    const body: DataGoKrBody = resp?.body ?? {}
+    let body: DataGoKrBody = resp?.body ?? {}
+    // 일부 서비스는 items가 {item:[...]} 대신 배열로, 상세 조회는 body.item 단수로 온다 — 도구가 보는 형태로 통일
+    if (Array.isArray((body as any).items)) body = { ...body, items: { item: (body as any).items } }
+    else if (!(body as any).items && (body as any).item) body = { ...body, items: { item: (body as any).item } }
     // 빈 결과는 캐시하지 않는다 — 원천 데이터 입력 지연 중의 빈 응답이 박제되면
     // TTL 동안 계속 "결과 없음"으로 오답을 주게 된다
     const items = body.items?.item
