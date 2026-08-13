@@ -32,8 +32,14 @@ npm install && npm run build
 ## 실행 모드 2가지
 
 - **stdio (기본)** — 내 컴퓨터의 Claude Desktop/Claude Code에 연결 (아래 설정)
-- **HTTP** — 서버 1대 띄워두고 여러 사용자가 ChatGPT·Claude 커넥터로 URL만 등록해 사용.
-  배포 절차·운영 옵션은 **[DEPLOY.md](DEPLOY.md)** 참조 (기관 인수인계용 문서)
+- **HTTP** — 서버 1대 띄우면 세 가지가 한번에 제공됨:
+  - **챗봇 사이트** (`/`) — 소방관이 브라우저로 접속해 바로 채팅. 질문마다 공식 데이터를
+    먼저 조회하고 그 자료 안에서만 답하는 구조라 할루시네이션이 차단됨.
+    LLM 키(제미나이/Claude/GPT 중 택1)를 꽂으면 AI 답변, 없으면 조회 결과 원문 표시
+  - **챗봇 API** (`POST /api/chat`)
+  - **MCP 엔드포인트** (`/mcp`) — ChatGPT·Claude 커넥터 연결용
+
+  배포 절차·LLM 연결·운영 옵션은 **[DEPLOY.md](DEPLOY.md)** 참조 (기관 인수인계용 문서)
 
 ```bash
 node build/index.js --mode http   # PORT env로 포트 지정 (기본 8080)

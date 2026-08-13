@@ -33,6 +33,9 @@ const ALIASES: Record<string, string> = {
   초고층법: "초고층 및 지하연계 복합건축물 재난관리에 관한 특별법",
 }
 
+/** 라우팅용 별칭 목록 (질문 문장에서 법령명 감지에 사용) */
+export const FIRE_LAW_ALIASES: readonly string[] = Object.keys(ALIASES)
+
 export function resolveFireLawAlias(query: string): string {
   // 실무자는 "화재 예방법"처럼 띄어 쓰기도 하므로 공백 제거본으로 판정한다
   const q = query.trim().replace(/\s+/g, "")

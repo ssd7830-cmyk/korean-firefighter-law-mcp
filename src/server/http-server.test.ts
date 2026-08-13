@@ -104,3 +104,22 @@ describe("SERVER_AUTH_TOKEN — 접근 보호", () => {
     expect(withAuth.status).toBe(200)
   })
 })
+
+describe("챗봇 라우트", () => {
+  it("GET / 는 채팅 화면 HTML을 준다", async () => {
+    const res = await fetch(`${URL_BASE}/`)
+    expect(res.status).toBe(200)
+    const html = await res.text()
+    expect(html).toContain("소방 AI 도우미")
+    expect(html).toContain("/api/chat")
+  })
+
+  it("POST /api/chat 에 message 없으면 400", async () => {
+    const res = await fetch(`${URL_BASE}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
+    expect(res.status).toBe(400)
+  })
+})

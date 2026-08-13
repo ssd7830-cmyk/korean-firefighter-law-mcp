@@ -10,6 +10,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { requestContext } from "../lib/request-context.js"
 import { createMcpServer } from "./factory.js"
+import { handleChat } from "./chat-pipeline.js"
+import { createLlmAdapter } from "./llm-adapter.js"
+import { CHAT_PAGE_HTML } from "../web/chat-page.js"
 import type { Clients } from "../tool-registry.js"
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -30,10 +33,39 @@ function headerValue(req: IncomingMessage, name: string): string | undefined {
 }
 
 export function startHttpServer(clients: Clients, port: number): void {
+  const adapter = createLlmAdapter()
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
       if (req.url === "/health") {
         res.writeHead(200, { "Content-Type": "text/plain" }).end("ok")
+        return
+      }
+      // 챗봇 화면 (소방관용) — 브라우저에서 바로 채팅
+      if (req.method === "GET" && (req.url === "/" || req.url === "/index.html")) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(CHAT_PAGE_HTML)
+        return
+      }
+      // 챗봇 API — 무조건 조회 → (LLM 있으면) 자료 기반 답변
+      if (req.url === "/api/chat") {
+        if (req.method !== "POST") {
+          res.writeHead(405, { Allow: "POST" }).end()
+          return
+        }
+        let message: unknown
+        try {
+          message = (JSON.parse(await readBody(req)) as { message?: unknown }).message
+        } catch {
+          res.writeHead(400, { "Content-Type": "text/plain" }).end("invalid json")
+          return
+        }
+        if (typeof message !== "string" || !message.trim() || message.length > 2000) {
+          res.writeHead(400, { "Content-Type": "text/plain" }).end("message required (1~2000자)")
+          return
+        }
+        const result = await handleChat(message, clients, adapter)
+        res
+          .writeHead(200, { "Content-Type": "application/json; charset=utf-8" })
+          .end(JSON.stringify(result))
         return
       }
       if (!req.url?.startsWith("/mcp")) {
@@ -84,6 +116,12 @@ export function startHttpServer(clients: Clients, port: number): void {
   })
 
   httpServer.listen(port, () => {
-    console.error(`korean-firefighter-law-mcp HTTP 모드 시작 — POST /mcp (포트 ${port})`)
+    const llmNote = adapter ? `AI 답변 모드 (${adapter.name})` : "조회 모드 (LLM 키 없음 — DEPLOY.md 'LLM 연결' 참조)"
+    console.error(
+      `korean-firefighter-law-mcp HTTP 모드 시작 (포트 ${port})\n` +
+        `  챗봇:     GET  /        — ${llmNote}\n` +
+        `  챗봇 API: POST /api/chat\n` +
+        `  MCP:      POST /mcp`
+    )
   })
 }
