@@ -21,4 +21,20 @@ describe("tool-registry — 등록 무결성", () => {
       expect(tool.name).toMatch(/^[a-z][a-z0-9_]*$/)
     }
   })
+
+  it("모든 도구가 과도하게 긴 문자열 인자를 외부 API 호출 전에 거부한다", () => {
+    const huge = "가".repeat(10_000)
+    const args: Record<string, Record<string, string>> = {
+      search_fire_stats: { date: huge },
+      get_ems_stats: { sido: huge },
+      search_fire_building: { sido: huge },
+      get_building_facilities: { sido: huge },
+      search_fire_law: { query: huge },
+      get_fire_law_text: { lawName: huge },
+      search_fire_precedents: { query: huge },
+      search_fire_admin_rules: { query: huge },
+      search_hazmat: { query: huge },
+    }
+    for (const tool of allTools) expect(tool.schema.safeParse(args[tool.name]).success, tool.name).toBe(false)
+  })
 })

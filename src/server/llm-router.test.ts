@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { llmRoute } from "./llm-router.js"
 import type { LlmAdapter } from "./llm-adapter.js"
 
@@ -7,6 +7,8 @@ function mock(reply: string): LlmAdapter {
 }
 
 describe("llmRoute — LLM이 질문을 도구·인자로 변환, 모든 실패는 null(규칙 폴백)", () => {
+  afterEach(() => vi.useRealTimers())
+
   it("정상 JSON → 라우팅 결과 (개떡같은 질문도 스키마만 맞으면 통과)", async () => {
     const r = await llmRoute(
       "소방시설 제10",
@@ -56,5 +58,25 @@ describe("llmRoute — LLM이 질문을 도구·인자로 변환, 모든 실패�
     expect(sys).toContain("search_fire_stats")
     expect(sys).toContain("소방시설 설치 및 관리에 관한 법률")
     expect(sys).toContain("오늘")
+    expect(sys).toContain("인천소방본부")
+    expect(sys).toContain("전남광주통합특별시소방본부")
+  })
+
+  it("라우팅 기준일은 UTC 서버에서도 한국 날짜다", async () => {
+    const oldTz = process.env.TZ
+    process.env.TZ = "UTC"
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-08-12T15:30:00Z"))
+    let sys = ""
+    await llmRoute("오늘 화재", {
+      name: "spy",
+      generate: async (system) => {
+        sys = system
+        return "no json"
+      },
+    })
+    expect(sys).toContain("오늘: 2026-08-13")
+    if (oldTz === undefined) delete process.env.TZ
+    else process.env.TZ = oldTz
   })
 })

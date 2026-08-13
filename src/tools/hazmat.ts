@@ -8,7 +8,7 @@ import { textResult, type ToolResult } from "../lib/errors.js"
 const SVC = "materialInfoSvc"
 
 export const SearchHazmatSchema = z.object({
-  query: z.string().min(1).describe('물질명·CAS번호·UN번호 (예: "아세톤", "67-64-1", "1090")'),
+  query: z.string().min(1).max(100).describe('물질명·CAS번호·UN번호 (예: "아세톤", "67-64-1", "1090")'),
   display: z.number().int().min(1).max(50).default(10).describe("결과 수"),
 })
 

@@ -14,8 +14,13 @@ export interface LlmAdapter {
   generate(system: string, user: string): Promise<string>
 }
 
+function llmTimeoutMs(): number {
+  const configured = Number(process.env.LLM_TIMEOUT_MS)
+  return Number.isFinite(configured) && configured > 0 ? configured : 30_000
+}
+
 function geminiAdapter(): LlmAdapter {
-  const model = process.env.LLM_MODEL || "gemini-2.5-flash"
+  const model = process.env.LLM_MODEL || "gemini-3.6-flash"
   return {
     name: "gemini",
     async generate(system, user) {
@@ -23,6 +28,7 @@ function geminiAdapter(): LlmAdapter {
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: "POST",
+          signal: AbortSignal.timeout(llmTimeoutMs()),
           headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY! },
           body: JSON.stringify({
             system_instruction: { parts: [{ text: system }] },
@@ -42,8 +48,8 @@ function geminiAdapter(): LlmAdapter {
 }
 
 function claudeAdapter(): LlmAdapter {
-  const model = process.env.LLM_MODEL || "claude-opus-5"
-  const client = new Anthropic()
+  const model = process.env.LLM_MODEL || "claude-haiku-4-5"
+  const client = new Anthropic({ timeout: llmTimeoutMs() })
   return {
     name: "claude",
     async generate(system, user) {
@@ -65,27 +71,30 @@ function claudeAdapter(): LlmAdapter {
 }
 
 function openaiAdapter(): LlmAdapter {
-  const model = process.env.LLM_MODEL || "gpt-4o-mini"
+  const model = process.env.LLM_MODEL || "gpt-5.6-luna"
   return {
     name: "openai",
     async generate(system, user) {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      const res = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
+        signal: AbortSignal.timeout(llmTimeoutMs()),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         },
         body: JSON.stringify({
           model,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
+          instructions: system,
+          input: user,
         }),
       })
       if (!res.ok) throw new Error(`OpenAI API 오류 (HTTP ${res.status})`)
       const json: any = await res.json()
-      const text = json?.choices?.[0]?.message?.content
+      const text = (json?.output ?? [])
+        .flatMap((item: any) => item?.content ?? [])
+        .filter((item: any) => item?.type === "output_text")
+        .map((item: any) => item.text ?? "")
+        .join("")
       if (!text) throw new Error("OpenAI가 빈 응답을 반환했습니다.")
       return text
     },
@@ -104,12 +113,17 @@ export function createLlmAdapter(): LlmAdapter | null {
           : "")
   switch (provider) {
     case "gemini":
+      if (!process.env.GEMINI_API_KEY) throw new Error("LLM_PROVIDER=gemini에는 GEMINI_API_KEY가 필요합니다.")
       return geminiAdapter()
     case "claude":
+      if (!process.env.ANTHROPIC_API_KEY) throw new Error("LLM_PROVIDER=claude에는 ANTHROPIC_API_KEY가 필요합니다.")
       return claudeAdapter()
     case "openai":
+      if (!process.env.OPENAI_API_KEY) throw new Error("LLM_PROVIDER=openai에는 OPENAI_API_KEY가 필요합니다.")
       return openaiAdapter()
-    default:
+    case "":
       return null // 조회 모드
+    default:
+      throw new Error("LLM_PROVIDER는 gemini, claude, openai 중 하나여야 합니다.")
   }
 }

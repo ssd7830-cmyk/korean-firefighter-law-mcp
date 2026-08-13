@@ -4,7 +4,7 @@ import { toArray } from "../lib/xml.js"
 import { textResult, type ToolResult } from "../lib/errors.js"
 
 export const SearchFirePrecedentsSchema = z.object({
-  query: z.string().min(1).describe("검색어 (예: 소방시설 점검, 위험물 저장, 소방공무원 순직)"),
+  query: z.string().min(1).max(200).describe("검색어 (예: 소방시설 점검, 위험물 저장, 소방공무원 순직)"),
   display: z.number().int().min(1).max(100).default(20).describe("결과 수"),
 })
 

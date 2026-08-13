@@ -8,6 +8,7 @@
 import { zodToJsonSchema } from "zod-to-json-schema"
 import { allTools } from "../tool-registry.js"
 import { FIRE_LAWS, FIRE_LAW_ALIASES } from "../lib/search-normalizer.js"
+import { koreanDate } from "../lib/korean-date.js"
 import type { LlmAdapter } from "./llm-adapter.js"
 import type { RoutedQuery } from "./query-router.js"
 
@@ -26,14 +27,14 @@ ${catalog}
 - 소방 관계 법령 정식 명칭: ${FIRE_LAWS.join(" / ")}
 - 통용 약칭: ${FIRE_LAW_ALIASES.join(", ")} — "소방시설"처럼 일부만 말해도 가장 가까운 법령의 정식 명칭이나 약칭을 lawName에 넣는다
 - 조번호 jo는 "제10조"/"제10조의2" 형식으로 정규화 ("제10", "10조" 같은 변형 포함)
-- 구급통계 sido는 시도본부명 (예: "서울소방재난본부")
+- 구급통계 sido는 기관별 실제 시도본부명. 예: "서울소방재난본부", "인천소방본부", "대구소방안전본부", "제주소방안전본부"
+- 광주·전남은 2026년 7월 이후 "전남광주통합특별시소방본부". 그 전 자료는 각각 "광주소방안전본부", "전남소방본부"
 - 어느 도구인지 확신이 없으면 {"tool":"search_fire_law","args":{"query":"핵심 키워드"}}`
 }
 
 export async function llmRoute(message: string, adapter: LlmAdapter): Promise<RoutedQuery | null> {
   try {
-    const d = new Date()
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+    const today = koreanDate().iso
     const raw = await adapter.generate(routingPrompt(today), `질문: ${message}`)
     const m = raw.match(/\{[\s\S]*\}/)
     if (!m) return null

@@ -76,7 +76,18 @@ export const CHAT_PAGE_HTML = `<!doctype html>
 const chat = document.getElementById("chat"), input = document.getElementById("input"),
       send = document.getElementById("send"), empty = document.getElementById("empty"),
       convList = document.getElementById("convList");
-let convs = JSON.parse(localStorage.getItem("fire-convs") || "[]");
+let convs = [];
+try { convs = JSON.parse(localStorage.getItem("fire-convs") || "[]"); } catch { convs = []; }
+if (!Array.isArray(convs)) convs = [];
+convs = convs.filter(c => c && typeof c.title === "string" && Array.isArray(c.msgs))
+  .slice(0, 30)
+  .map(c => ({
+    title: c.title.slice(0, 100),
+    msgs: c.msgs.filter(m => m && (m.role === "user" || m.role === "bot") && typeof m.text === "string")
+      .slice(-200)
+      .map(m => ({ role: m.role, text: m.text, meta: typeof m.meta === "string" ? m.meta : "" }))
+  }));
+let chatToken = sessionStorage.getItem("fire-chat-token") || "";
 let current = null;
 
 function renderList() {
@@ -114,28 +125,48 @@ function addRow(role, text, meta, scroll = true) {
   if (scroll) chat.scrollTop = chat.scrollHeight;
   return b;
 }
-function save() { localStorage.setItem("fire-convs", JSON.stringify(convs.slice(0, 30))); }
+function save() { try { localStorage.setItem("fire-convs", JSON.stringify(convs.slice(0, 30))); } catch {} }
+
+async function requestChat(text) {
+  const headers = { "Content-Type": "application/json" };
+  if (chatToken) headers.Authorization = "Bearer " + chatToken;
+  const options = { method: "POST", headers, body: JSON.stringify({ message: text }) };
+  let res = await fetch("/api/chat", options);
+  if (res.status === 401) {
+    const entered = window.prompt("접속 토큰을 입력하세요.");
+    if (!entered) throw new Error("인증이 필요합니다.");
+    chatToken = entered.trim();
+    sessionStorage.setItem("fire-chat-token", chatToken);
+    headers.Authorization = "Bearer " + chatToken;
+    res = await fetch("/api/chat", options);
+  }
+  if (!res.ok) {
+    if (res.status === 429) throw new Error("요청이 너무 많습니다. 1분 후 다시 시도하세요.");
+    if (res.status === 401) throw new Error("접속 토큰이 올바르지 않습니다.");
+    throw new Error("요청 실패 (HTTP " + res.status + ")");
+  }
+  return res.json();
+}
 
 async function ask(text) {
-  if (!text.trim()) return;
+  if (!text.trim() || send.disabled) return;
   if (current === null) { convs.unshift({ title: text.slice(0, 28), msgs: [] }); current = 0; renderList(); }
+  const targetConv = convs[current];
   if (empty.parentNode) empty.remove();
-  convs[current].msgs.push({ role: "user", text });
+  targetConv.msgs.push({ role: "user", text });
   addRow("user", text);
   input.value = ""; input.style.height = "auto"; send.disabled = true;
   const thinking = addRow("bot", "조회 중…");
   try {
-    const res = await fetch("/api/chat", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text }),
-    });
-    const data = await res.json();
+    const data = await requestChat(text);
     const meta = (data.mode === "llm" ? "AI 답변" : "조회 결과 원문") + " · 근거: " + data.tool;
-    thinking.textContent = data.answer;
-    const mm = document.createElement("div"); mm.className = "meta"; mm.textContent = meta; thinking.appendChild(mm);
-    convs[current].msgs.push({ role: "bot", text: data.answer, meta });
+    if (convs.includes(targetConv)) targetConv.msgs.push({ role: "bot", text: data.answer, meta });
+    if (convs[current] === targetConv) {
+      thinking.textContent = data.answer;
+      const mm = document.createElement("div"); mm.className = "meta"; mm.textContent = meta; thinking.appendChild(mm);
+    }
   } catch (e) {
-    thinking.textContent = "요청 실패: 서버에 연결할 수 없습니다.";
+    if (convs[current] === targetConv) thinking.textContent = "요청 실패: " + (e.message || "서버에 연결할 수 없습니다.");
   }
   save(); send.disabled = false; chat.scrollTop = chat.scrollHeight; input.focus();
 }

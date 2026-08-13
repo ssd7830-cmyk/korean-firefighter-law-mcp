@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "firefighter-law": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./build/index.js"],
+      "env": {
+        "DATA_GO_KR_KEY": "${DATA_GO_KR_KEY:-}",
+        "LAW_OC": "${LAW_OC:-}"
+      }
+    }
+  }
+}

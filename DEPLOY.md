@@ -1,93 +1,163 @@
-# 배포 안내 (인수인계 문서)
+# 기관 서버형 배포 안내
 
-이 문서만 보면 배포할 수 있게 작성했습니다. 코드 수정은 필요 없습니다.
+> 적용 버전: v0.6.0 / 대상: 기관 서버·시범운영 담당자
 
-## 0. 준비물 — 인증키 2개 (모두 무료)
+기관 서버형은 서버 한 대에서 다음 인터페이스를 제공합니다.
 
-| 키 | 발급처 | 절차 |
+- `GET /` — 브라우저용 소방 AI 도우미
+- `POST /api/chat` — 기관 서비스가 호출할 자연어 질의 API
+- `POST /mcp` — 원격 Streamable HTTP MCP
+- `GET /health` — 생존 확인
+
+각 PC에 설치하려면 [LOCAL_SETUP.md](LOCAL_SETUP.md)를 사용합니다.
+
+## 1. 배포 전 의사결정
+
+1. 외부 인터넷에 공개할지, 기관망에서만 제공할지 정합니다.
+2. 정부 API 계정·키의 소유자와 갱신 담당자를 기관 명의로 정합니다.
+3. LLM을 사용할 경우 질문과 조회 자료가 외부 LLM 사업자로 전송되는 것을 기관 정책상 허용할지 검토합니다.
+4. 개인정보·민감정보 입력 금지 안내, 이용자 범위, 로그 보존, 사고 대응 절차를 정합니다.
+5. ChatGPT/Claude 원격 MCP를 쓸 경우 해당 서비스의 요금제·관리자 권한·인증 방식과 기관 승인 여부를
+   현재 공식 문서로 다시 확인합니다.
+
+LLM은 선택입니다. 설정하지 않으면 질문을 규칙으로 분류하고 공식 API 조회 결과 원문만 보여줍니다.
+
+## 2. 정부 API 키 준비
+
+| 변수 | 발급처 | 사용 범위 |
 |---|---|---|
-| `DATA_GO_KR_KEY` | [공공데이터포털](https://www.data.go.kr) | 회원가입 → 아래 4개 API "활용신청" → 마이페이지에서 인증키 확인 |
-| `LAW_OC` | [법제처 국가법령정보 공동활용](https://open.law.go.kr) | OPEN API 신청 → 인증키(OC) 확인 |
+| `DATA_GO_KR_KEY` | [공공데이터포털](https://www.data.go.kr) | 화재·교통사고 구급·대상물·시설·위험물 |
+| `LAW_OC` | [법제처 국가법령정보 공동활용](https://open.law.go.kr) | 법령·조문·판례·행정규칙 |
 
-활용신청할 소방청 API 5개:
+공공데이터포털에서는 다음 5개 API를 각각 활용신청합니다.
+
 [화재정보서비스](https://www.data.go.kr/data/15077644/openapi.do) ·
 [구급통계서비스](https://www.data.go.kr/data/15099428/openapi.do) ·
 [특정소방대상물정보](https://www.data.go.kr/data/15155780/openapi.do) ·
 [특정소방대상물소방시설정보](https://www.data.go.kr/data/15155779/openapi.do) ·
 [국가위험물정보](https://www.data.go.kr/data/15061055/openapi.do)
 
-## 1. 배포 — 셋 중 하나 선택
+비용·승인·트래픽·유효기간은 변경될 수 있으므로 각 상세 페이지와 발급 계정의 현재 표시를 기준으로 합니다.
 
-### A. Docker (기관 내부 서버 권장)
+## 3. Docker 배포
 
-```bash
-git clone https://github.com/ssd7830-cmyk/korean-firefighter-law-mcp && cd korean-firefighter-law-mcp
-docker build -t firefighter-mcp .
-docker run -d -p 8080:8080 -e DATA_GO_KR_KEY="발급키" -e LAW_OC="발급OC" firefighter-mcp
-```
-
-확인: `curl http://localhost:8080/health` → `ok`
-
-### B. fly.io (소규모·개인 운영)
+Docker가 설치된 서버에서 실행합니다.
 
 ```bash
-git clone https://github.com/ssd7830-cmyk/korean-firefighter-law-mcp && cd korean-firefighter-law-mcp
-fly launch --no-deploy   # 앱 이름 지정
-fly secrets set DATA_GO_KR_KEY="발급키" LAW_OC="발급OC"
-fly deploy
+git clone https://github.com/ssd7830-cmyk/korean-firefighter-law-mcp.git
+cd korean-firefighter-law-mcp
+cp .env.example .env
+chmod 600 .env
 ```
 
-### C. 맨 Node (임시·테스트)
+`.env`에 다음 값을 입력합니다. 토큰은 충분히 긴 무작위 값으로 만들고 MCP용과 브라우저용을 분리합니다.
+
+```dotenv
+DATA_GO_KR_KEY=발급받은키
+LAW_OC=발급받은OC
+SERVER_AUTH_TOKEN=MCP용-긴-무작위-토큰
+CHAT_AUTH_TOKEN=브라우저용-별도-긴-무작위-토큰
+```
 
 ```bash
-git clone https://github.com/ssd7830-cmyk/korean-firefighter-law-mcp && cd korean-firefighter-law-mcp
-npm ci && npm run build
-DATA_GO_KR_KEY="발급키" LAW_OC="발급OC" node build/index.js --mode http
+docker build -t firefighter-mcp:v0.6.0 .
+docker run -d --name firefighter-mcp --restart=unless-stopped \
+  -p 127.0.0.1:8080:8080 --env-file .env firefighter-mcp:v0.6.0
+curl http://127.0.0.1:8080/health
 ```
 
-## 2. LLM 연결 (챗봇 AI 답변용 — 셋 중 하나만)
+정상이면 `ok`를 반환합니다. 예시는 호스트의 루프백에만 바인딩합니다. Nginx·기관 로드밸런서 등에서
+TLS를 종료하고 인증·접근제어를 적용한 뒤 외부에 노출합니다. 서버 자체는 TLS를 제공하지 않습니다.
 
-서버에는 **챗봇 사이트가 내장**되어 있습니다 (`https://서버주소/` 접속). LLM 키 없이도
-"조회 모드"로 동작하지만(질문 → 공식 데이터 조회 결과 원문 표시), 아래 키 중 하나를
-환경변수로 넣으면 ChatGPT처럼 자연어로 대답합니다:
+Docker를 쓰지 않는 시험 환경에서는 Node.js 22 이상으로 `npm ci`, `npm run verify` 후 아래처럼 실행합니다.
 
-| 환경변수 | 발급처 | 비고 |
+```bash
+DATA_GO_KR_KEY="키" LAW_OC="OC" \
+SERVER_AUTH_TOKEN="MCP토큰" CHAT_AUTH_TOKEN="챗토큰" \
+node build/index.js --mode http
+```
+
+이 방식은 터미널이 종료되면 서버도 종료되므로 서비스 운영에는 프로세스 관리자나 컨테이너를 사용합니다.
+
+## 4. LLM 연결
+
+다음 중 하나의 키를 서버 환경변수로 설정합니다.
+
+| 변수 | 공급자 | 현재 기본 모델 |
 |---|---|---|
-| `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) | **무료 티어 있음 — 시범 운영 권장.** 무료 티어는 입력이 모델 개선에 활용될 수 있으므로 정식 운영 시 유료 전환 |
-| `ANTHROPIC_API_KEY` | [platform.claude.com](https://platform.claude.com) | Claude |
-| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) | GPT |
+| `GEMINI_API_KEY` | [Gemini 모델 문서](https://ai.google.dev/gemini-api/docs/latest-model) | `gemini-3.6-flash` |
+| `ANTHROPIC_API_KEY` | [Claude 모델 문서](https://platform.claude.com/docs/en/about-claude/models/overview) | `claude-haiku-4-5` |
+| `OPENAI_API_KEY` | [OpenAI 모델 문서](https://developers.openai.com/api/docs/models/all) | `gpt-5.6-luna` |
 
-- 여러 키가 있으면 `LLM_PROVIDER=gemini|claude|openai`로 지정, 모델은 `LLM_MODEL`로 변경
-- **예산 산정 근거**: 질문 1건 = LLM 호출 1회. 경량 모델(제미나이 플래시 등) 기준 질문당 수 원 수준.
-  일 1,000질문 가정 시 월 예산 수만 원대에서 시작해 사용량 보고 조정 권장
-- **할루시네이션 차단 구조**: 챗봇은 질문마다 코드가 먼저 공식 데이터를 조회하고,
-  LLM은 그 자료 안에서만 답하도록 강제됩니다. 자료 없이 답변이 생성되는 경로는 없습니다
+여러 키가 있으면 `LLM_PROVIDER=gemini|claude|openai`로 선택하고, `LLM_MODEL`로 기관이 검증한 모델 ID를
+고정할 수 있습니다. 모델 수명과 가격은 자주 바뀌므로 공급자의 현재 모델·가격·데이터 통제 문서를 기준으로
+예산과 갱신 일정을 정합니다. 질문 1건은 라우팅과 답변에 최대 2회 LLM 호출을 사용합니다.
 
-## 3. 사용자(소방관) 안내
+LLM을 켠 경우에도 AI 요약과 공식 조회 원문을 함께 표시합니다. 이는 요약 오류 가능성을 낮추기 위한 보조
+장치이며 AI 요약 자체가 공식 해석이 되는 것은 아닙니다.
 
-**챗봇(권장 — 설치 제로)**: 브라우저에서 `https://서버주소/` 접속 → 바로 채팅.
+## 5. 환경변수
 
-**AI 커넥터(선택)**: MCP 엔드포인트는 `https://서버주소/mcp`.
-- ChatGPT: 설정 → 커넥터(개발자 모드) → 새 커넥터 → URL 입력
-- Claude: 설정 → 커넥터 → 커스텀 커넥터 추가 → 같은 URL
-
-"어제 서울 화재 몇 건이야?", "소방시설법 제10조 보여줘" 같은 질문이 바로 됩니다.
-
-## 4. 운영 옵션 (환경변수)
-
-| 변수 | 기본 | 설명 |
+| 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PORT` | 8080 | HTTP 포트 |
-| `SERVER_AUTH_TOKEN` | (없음) | 설정하면 `/mcp`에 `Authorization: Bearer <토큰>` 없는 요청 거부. 챗봇 화면(`/`)에는 적용되지 않음 — 챗봇 접근 제한이 필요하면 리버스프록시/내부망에서 처리 |
-| `LAW_API_PROTOCOL` | https | 폐쇄망 인증서 문제 시 `http` |
+| `PORT` | `8080` | HTTP 포트. 1~65535 정수를 사용 |
+| `SERVER_AUTH_TOKEN` | 없음 | `/mcp` Bearer 토큰 |
+| `CHAT_AUTH_TOKEN` | `SERVER_AUTH_TOKEN` | `/api/chat` 전용 Bearer 토큰 |
+| `CHAT_RATE_LIMIT_PER_MINUTE` | `60` | 식별 IP별 고정 1분 구간 요청 한도 |
+| `TRUST_PROXY` | `false` | 신뢰할 수 있는 프록시 뒤에서만 `true`; 첫 `X-Forwarded-For`를 사용 |
+| `LLM_PROVIDER` | 키 자동감지 | `gemini`, `claude`, `openai` 중 하나 |
+| `LLM_MODEL` | 공급자별 위 표 | 사용할 모델 ID |
+| `LLM_TIMEOUT_MS` | `30000` | LLM 1회 호출 제한시간(ms) |
+| `FIRE_BUILDING_OP` | 코드 기본값 | 대상물 API 오퍼레이션 변경 시 대체 |
+| `FIRE_FACILITY_OP` | 코드 기본값 | 시설 API 오퍼레이션 변경 시 대체 |
+| `LAW_REFERER` | `https://www.law.go.kr/` | 법제처 요청 Referer |
+| `LAW_API_PROTOCOL` | `https` | 비암호화 `http`는 키가 평문 전송되므로 운영 사용 금지 |
 
-- **HTTPS·도메인**: 리버스프록시(nginx 등)나 플랫폼(fly.io는 자동)에서 처리하세요. 서버 자체는 HTTP만 듣습니다.
-- **호출 한도**: 공공데이터포털 개발계정은 API별 일 1천~1만 건. 사용자가 늘면 data.go.kr에 **활용사례 등록 후 운영계정 트래픽 증설**을 신청하세요.
-- **개인 키 모드**: 공용 한도가 부족하면, 사용자가 각자 발급한 키를 요청 헤더 `X-Data-Go-Kr-Key` / `X-Law-Oc`로 보내게 할 수 있습니다 (서버 env 키보다 우선 적용).
+`X-Data-Go-Kr-Key`, `X-Law-Oc` 요청 헤더의 개인 키 우선 기능은 `/mcp`와 `/api/chat`에 적용됩니다.
+다만 서버로 키를 보내므로 반드시 HTTPS를 사용하고, 중간 프록시가 해당 헤더를 로그하지 않도록 설정합니다.
+애플리케이션은 키를 마스킹하지만 운영체제·프록시·호스팅 사업자의 로그까지 통제하지는 못합니다.
 
-## 5. 처음 켠 뒤 확인할 것
+## 6. 원격 MCP 연결
 
-모든 API의 오퍼레이션명·파라미터는 활용가이드 문서 기준으로 확정되어 실호출 검증까지 끝난 상태입니다 (2026-08-13).
-혹시 계정·시점에 따라 특정소방대상물 오퍼레이션명이 다르면 환경변수
-`FIRE_BUILDING_OP` / `FIRE_FACILITY_OP`로 교체할 수 있습니다 (코드 수정 불필요).
-켠 직후 챗봇에서 "소방시설법 제10조", "2025년 1월 1일 화재 현황", "아세톤 위험물이야?" 세 가지를 던져보면 법제처·통계·위험물 연동이 한 번에 확인됩니다.
+MCP URL은 `https://기관주소/mcp`입니다.
+
+- [ChatGPT의 커스텀 MCP 앱](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt-beta)은
+  로컬 서버에 직접 연결하지 않습니다. 현재 지원 요금제, 관리자/개발자 모드,
+  앱 생성 화면, 인증 방식을 확인한 뒤 시험 워크스페이스에서 도구 스캔을 통과해야 합니다.
+- [Claude의 원격 커스텀 커넥터](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)도
+  서비스별 관리자 정책과 인증 방식을 확인해야 합니다.
+- 이 서버의 단순 Bearer 토큰을 각 제품의 UI가 직접 수용하는지는 현재 환경에서 종단간 검증하지 못했습니다.
+  지원되지 않으면 기관 OAuth/OIDC 게이트웨이를 앞단에 두거나, 해당 제품이 제공하는 보안 터널·보관소 방식을
+  별도로 구현해야 합니다.
+
+따라서 URL 입력만으로 연동 완료라고 간주하지 않습니다. 도구 9개 스캔, 인증 실패/만료, 실제 도구 호출,
+권한 회수까지 시험해야 합니다.
+
+## 7. 배포 전 검증
+
+```bash
+npm ci
+npm run verify
+curl http://127.0.0.1:8080/health
+```
+
+그 뒤 브라우저 또는 `/api/chat`에서 다음 질문을 실행합니다.
+
+1. `소방시설법 제10조` — 법제처 조문
+2. `2025년 1월 1일 화재 현황` — 소방청 화재정보
+3. `아세톤 위험물이야?` — 소방청 위험물정보
+4. `인천 2025년 1월 교통사고 구급 통계` — `인천소방본부` 매핑과 교통사고 범위 표시
+5. `광주 2026년 8월 교통사고 구급 통계` — 통합 후 본부명이 실제 API에서 조회되는지 확인
+6. 기관이 실제로 쓸 건물·시설 질문 — 시도 전체 페이지 검색과 시설 라우팅 확인
+
+실패 응답, 빈 결과, 최근 데이터 지연은 자동 테스트만으로 판정할 수 없습니다. 원천 API 페이지·활용승인·
+트래픽과 비교하고 검증일·질문·결과를 [기준.md](기준.md)에 남깁니다.
+
+## 8. 운영 점검
+
+- 매일 또는 모니터링 시스템에서 `/health`를 확인합니다. 현재 health는 프로세스 생존만 확인하며 외부 API
+  정상 여부까지 확인하지 않습니다.
+- 월 1회 위 실질문, API 사용량, LLM 비용, 토큰 접근권한을 확인합니다.
+- 업데이트는 별도 시험 환경에서 `git pull --ff-only`, `npm ci`, `npm run verify`, Docker 빌드, 실연동 검증을
+  마친 뒤 배포합니다. ChatGPT 앱은 도구 변경이 자동 반영되지 않을 수 있으므로 관리자 재검토가 필요합니다.
+- 토큰이나 API 키가 노출되면 즉시 회수·재발급하고 프록시·호스팅 로그까지 확인합니다.

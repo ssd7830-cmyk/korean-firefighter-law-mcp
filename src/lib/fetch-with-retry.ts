@@ -13,7 +13,7 @@ export interface RetryOptions {
 
 /** 로그·에러 메시지에서 인증키 노출 방지 */
 export function maskSensitiveUrl(url: string): string {
-  return url.replace(/(serviceKey|ServiceKey|OC)=[^&]*/g, "$1=***")
+  return url.replace(/(serviceKey|OC)=[^&]*/gi, "$1=***")
 }
 
 function buildHeaders(url: string): Record<string, string> {

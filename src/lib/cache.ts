@@ -4,6 +4,8 @@
  * 이 인터페이스의 SQLite 구현체로 교체한다 — 도구 코드는 수정 불필요.
  */
 
+import { koreanDate } from "./korean-date.js"
+
 export interface CacheStore {
   get<T>(key: string): T | undefined
   set<T>(key: string, data: T, ttlMs: number): void
@@ -54,7 +56,6 @@ export const TTL = {
  */
 export function statsTtlFor(period?: string): number {
   if (!period) return TTL.SEARCH
-  const now = new Date()
-  const currentMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`
+  const currentMonth = koreanDate().compact.slice(0, 6)
   return period.slice(0, 6) < currentMonth ? TTL.CLOSED_STATS : TTL.SEARCH
 }

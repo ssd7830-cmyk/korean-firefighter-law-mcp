@@ -63,6 +63,7 @@ export class FireApiClient {
             `키 미등록/미승인이면 data.go.kr에서 해당 API 활용신청 상태를 확인하세요.`
         )
       }
+      if (!response.ok) throw new Error(`API 오류 (HTTP ${response.status}): ${operation}`)
       const resp = parsed?.response
       if (resp?.body) return this.checkAndCache(resp, cacheKey, ttlMs)
       throw new Error(`API가 해석 불가능한 XML을 반환했습니다: ${operation}`)

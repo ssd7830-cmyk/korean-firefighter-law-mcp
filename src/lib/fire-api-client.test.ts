@@ -86,6 +86,14 @@ describe("FireApiClient — 의도: 키 처리·오류 안내·캐시 정책", (
       /99.*INVALID PARAM/s
     )
   })
+
+  it("HTTP 오류가 정상 모양 XML을 담아도 성공 데이터로 받아들이지 않는다", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<response><body><items><item><a>1</a></item></items></body></response>", { status: 400 }))
+    )
+    await expect(new FireApiClient(new InMemoryLruCache()).call("S", "op", {}, 1000)).rejects.toThrow(/HTTP 400/)
+  })
 })
 
 describe("FireApiClient — 응답 변형 흡수 (위험물 서비스)", () => {

@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from "vitest"
 import { searchFireStats, SearchFireStatsSchema } from "./fire-stats.js"
-import { getEmsStats } from "./ems-stats.js"
+import { getEmsStats, GetEmsStatsSchema } from "./ems-stats.js"
 import { getBuildingFacilities, searchFireBuilding } from "./fire-building.js"
 import { searchFireLaw, getFireLawText } from "./fire-law.js"
 import { searchFirePrecedents } from "./fire-precedents.js"
-import { searchFireAdminRules } from "./fire-admin-rules.js"
+import { searchFireAdminRules, SearchFireAdminRulesSchema } from "./fire-admin-rules.js"
 import { searchHazmat } from "./hazmat.js"
+import { koreanDate } from "../lib/korean-date.js"
 
 function fakeFireClient(items: unknown[]) {
   return {
@@ -50,10 +51,65 @@ describe("도구 핸들러 — 의도: API 파라미터 매핑이 스펙과 일�
     expect(result.content[0].text).not.toContain("시청사")
   })
 
+  it("건물명 검색은 첫 페이지 밖의 결과까지 조회한다", async () => {
+    const client = {
+      call: vi.fn(async (_service, _op, params) =>
+        params.pageNo === 1
+          ? { items: { item: [{ objNm: "시청사" }] }, totalCount: 1001 }
+          : { items: { item: [{ objNm: "롯데호텔" }] }, totalCount: 1001 }
+      ),
+    } as any
+    const result = await getBuildingFacilities(client, {
+      sido: "서울특별시",
+      buildingName: "롯데호텔",
+      pageNo: 1,
+      numOfRows: 50,
+    })
+    expect(client.call).toHaveBeenCalledTimes(2)
+    expect(result.content[0].text).toContain("롯데호텔")
+    expect(result.content[0].text).toContain("전체 1건")
+  })
+
+  it("특정소방대상물도 건물명으로 전체 페이지를 검색한다", async () => {
+    const client = {
+      call: vi.fn(async (_service, _op, params) =>
+        params.pageNo === 1
+          ? { items: { item: [{ objNm: "시청사" }] }, totalCount: 1001 }
+          : { items: { item: [{ objNm: "롯데타워" }] }, totalCount: 1001 }
+      ),
+    } as any
+    const result = await searchFireBuilding(client, {
+      sido: "서울특별시",
+      buildingName: "롯데타워",
+      pageNo: 1,
+      numOfRows: 50,
+    })
+    expect(client.call).toHaveBeenCalledTimes(2)
+    expect(result.content[0].text).toContain("롯데타워")
+  })
+
+  it("구급 응답은 교통사고 통계만 연결된 범위를 명시한다", async () => {
+    const result = await getEmsStats(fakeFireClient([{}]), {
+      sido: "서울소방재난본부",
+      pageNo: 1,
+      numOfRows: 100,
+    })
+    expect(result.content[0].text).toContain("현재 연결 범위는 교통사고 구급활동")
+  })
+
   it("날짜 형식이 틀리면 스키마가 힌트와 함께 거부한다", () => {
     const parsed = SearchFireStatsSchema.safeParse({ date: "2025-01-01" })
     expect(parsed.success).toBe(false)
     expect(JSON.stringify(parsed.error?.issues)).toContain("YYYYMMDD")
+  })
+
+  it("형식은 맞아도 달력에 없는 날짜·월은 스키마가 거부한다", () => {
+    expect(SearchFireStatsSchema.safeParse({ date: "20250230" }).success).toBe(false)
+    expect(GetEmsStatsSchema.safeParse({ sido: "인천소방본부", month: "202513" }).success).toBe(false)
+  })
+
+  it("빈 행정규칙 검색어는 외부 API로 보내지 않는다", () => {
+    expect(SearchFireAdminRulesSchema.safeParse({ query: "" }).success).toBe(false)
   })
 })
 
@@ -98,8 +154,7 @@ describe("법령 도구 — 의도: 정확한 법령 선택", () => {
 
 describe("의도: 캐시 TTL은 데이터 확정 여부를 따른다 (빨간불 사냥 2차)", () => {
   it("구급통계 — 지난달 이전 월은 길게, 이번 달·월 미지정은 짧게 캐시한다", async () => {
-    const now = new Date()
-    const thisMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`
+    const thisMonth = koreanDate().compact.slice(0, 6)
     const longTtl = 7 * 24 * 60 * 60 * 1000
     const client = fakeFireClient([{}])
     await getEmsStats(client, { sido: "서울소방재난본부", month: "202001", pageNo: 1, numOfRows: 100 })

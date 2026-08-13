@@ -8,6 +8,7 @@ import { textResult, type ToolResult } from "../lib/errors.js"
 export const SearchFireLawSchema = z.object({
   query: z
     .string()
+    .max(200)
     .optional()
     .describe("법령명 또는 키워드 (약칭 지원: 화재예방법, 소방시설법 등). 비우면 소방 법령 목록 표시"),
   display: z.number().int().min(1).max(100).default(20).describe("결과 수"),
@@ -46,9 +47,9 @@ export async function searchFireLaw(client: LawApiClient, args: SearchFireLawInp
 }
 
 export const GetFireLawTextSchema = z.object({
-  lawName: z.string().optional().describe("법령명 (약칭 지원, mst 없을 때 검색해서 첫 매칭 사용)"),
-  mst: z.string().optional().describe("법령일련번호 MST (search_fire_law 결과의 값, 있으면 우선)"),
-  jo: z.string().optional().describe('조번호 (예: "제10조", "10", "10의2"). 비우면 전체 (길면 잘림)'),
+  lawName: z.string().max(200).optional().describe("법령명 (약칭 지원, mst 없을 때 검색해서 첫 매칭 사용)"),
+  mst: z.string().max(30).optional().describe("법령일련번호 MST (search_fire_law 결과의 값, 있으면 우선)"),
+  jo: z.string().max(30).optional().describe('조번호 (예: "제10조", "10", "10의2"). 비우면 전체 (길면 잘림)'),
 })
 
 export type GetFireLawTextInput = z.infer<typeof GetFireLawTextSchema>

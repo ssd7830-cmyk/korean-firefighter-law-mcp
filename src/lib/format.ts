@@ -49,14 +49,18 @@ export function formatBody(body: DataGoKrBody, title: string, maxItems = 50): st
   if (items.length === 0) {
     return `${title}\n결과 없음 (totalCount: ${total}). 파라미터(날짜 형식·지역명)를 확인하세요.`
   }
-  const lines = items.slice(0, maxItems).map((item, i) => {
+  const shown = Math.min(items.length, maxItems)
+  const lines = items.slice(0, shown).map((item, i) => {
     const fields = Object.entries(item)
       .filter(([, v]) => v !== null && v !== undefined && v !== "")
       .map(([k, v]) => `${LABELS[k] ?? k}: ${String(v).replace(/\r?\n|<br\s*\/?>/gi, " ").trim()}`)
       .join(" | ")
     return `${i + 1}. ${fields}`
   })
-  const truncated = items.length > maxItems ? `\n… 외 ${items.length - maxItems}건 생략` : ""
+  const parsedTotal = Number(total)
+  const knownCount = Number.isFinite(parsedTotal) && parsedTotal >= items.length ? parsedTotal : items.length
+  const omitted = Math.max(0, knownCount - shown)
+  const truncated = omitted > 0 ? `\n… 외 ${omitted}건 생략` : ""
   return `${title} (전체 ${total}건)\n${lines.join("\n")}${truncated}`
 }
 

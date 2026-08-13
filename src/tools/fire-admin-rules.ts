@@ -4,7 +4,7 @@ import { toArray } from "../lib/xml.js"
 import { textResult, type ToolResult } from "../lib/errors.js"
 
 export const SearchFireAdminRulesSchema = z.object({
-  query: z.string().describe('검색어 — 시설명이면 충분 (예: "스프링클러", "옥내소화전", "방화문")'),
+  query: z.string().min(1).max(200).describe('검색어 — 시설명이면 충분 (예: "스프링클러", "옥내소화전", "방화문")'),
   display: z.number().int().min(1).max(100).default(20).describe("결과 수"),
 })
 

@@ -50,7 +50,7 @@ export const allTools: McpTool[] = [
   },
   {
     name: "search_fire_building",
-    description: "특정소방대상물(건물) 검색 — 시도·사용승인연도별",
+    description: "특정소방대상물(건물) 검색 — 시도·건물명·사용승인연도별",
     schema: SearchFireBuildingSchema,
     handler: (c, a) => searchFireBuilding(c.fire, SearchFireBuildingSchema.parse(a)),
   },

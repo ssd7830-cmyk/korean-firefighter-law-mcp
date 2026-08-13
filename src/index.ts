@@ -7,6 +7,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createClients, createMcpServer } from "./server/factory.js"
 import { startHttpServer } from "./server/http-server.js"
+import { httpPort } from "./server/config.js"
 import { VERSION } from "./version.js"
 
 async function main(): Promise<void> {
@@ -16,7 +17,7 @@ async function main(): Promise<void> {
   const clients = createClients()
 
   if (mode === "http") {
-    startHttpServer(clients, Number(process.env.PORT) || 8080)
+    startHttpServer(clients, httpPort(process.env.PORT))
     return
   }
 

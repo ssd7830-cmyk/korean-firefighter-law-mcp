@@ -1,204 +1,140 @@
-# korean-firefighter-law-mcp — 아키텍처 설계
+# 아키텍처
 
-> 현행 아키텍처 (v0.4 반영) | 2026-08
+> 현행 v0.6.0 · 2026-08-13
 
-소방 데이터 3덩어리(화재·구급 통계 + 소방시설 정보 + 소방 법령)를 AI가 바로 쓸 수 있는
-MCP 도구로 묶는다. HTTP 모드에서는 같은 도구 위에 소방관용 챗봇 페이지를 얹는다.
+소방청·법제처 API를 9개 읽기 전용 MCP 도구로 묶고, 같은 도구 위에 선택형 웹 채팅을 제공합니다.
 
----
+## 두 배포 형태
 
-## 핵심 결정사항
+```text
+개별 PC 설치형                         기관 서버형
+┌─────────────────┐                 ┌────────────────────┐
+│ stdio MCP client │                 │ 브라우저 / API /    │
+│ (로컬 AI 앱)     │                 │ 원격 MCP client     │
+└────────┬────────┘                 └─────────┬──────────┘
+         │ stdio                              │ HTTPS(앞단 프록시)
+┌────────▼────────────────────────────────────▼──────────┐
+│ korean-firefighter-law-mcp                           │
+│ tool registry · query/LLM router · chat pipeline     │
+└────────┬──────────────────────────────┬───────────────┘
+         │ HTTPS                        │ HTTPS
+┌────────▼────────────┐       ┌─────────▼──────────────┐
+│ 소방청 data.go.kr   │       │ 법제처 law.go.kr       │
+└─────────────────────┘       └────────────────────────┘
+```
 
-| 결정 | 선택 | 이유 |
+- stdio는 AI 클라이언트가 로컬 프로세스를 실행합니다. 웹 채팅과 서버 내 LLM 어댑터는 사용하지 않습니다.
+- HTTP는 `GET /`, `POST /api/chat`, `POST /mcp`, `GET /health`를 제공합니다.
+- HTTP의 MCP는 요청마다 서버/transport를 만드는 stateless JSON 응답 방식입니다. GET SSE 세션은 제공하지 않습니다.
+- ChatGPT는 로컬 stdio에 직접 연결하지 않습니다. 원격 제품 호환성은 배포 제품에서 별도 종단간 검증합니다.
+
+## 처리 흐름
+
+### MCP 도구 호출
+
+1. MCP SDK가 도구명과 인자를 받습니다.
+2. `tool-registry.ts`가 등록 도구를 찾고 Zod 스키마로 검증합니다.
+3. 도구가 공공 API 클라이언트를 호출합니다.
+4. 공통 포맷터가 한국어 텍스트 결과 또는 마스킹된 오류를 반환합니다.
+
+### 웹 채팅/API
+
+1. 토큰, IP별 호출 제한, 요청 크기를 검사합니다.
+2. LLM 키가 있으면 LLM이 도구명·인자 JSON만 고릅니다. 실패하거나 잘못된 JSON이면 규칙 라우터로 전환합니다.
+3. 선택된 도구로 공식 API를 먼저 조회합니다. 조회가 실패하면 답변 생성을 하지 않습니다.
+4. LLM 키가 없으면 조회 원문을 반환합니다.
+5. LLM 키가 있으면 조회 자료 안에서만 요약하도록 요청하고, AI 요약 아래 공식 조회 원문을 붙입니다.
+
+LLM은 정부 API의 사실 자료를 대신 만들 수 없지만 자료를 잘못 요약할 수 있습니다. 원문 병기는 검토 수단이지
+요약의 정확성을 보증하지 않습니다.
+
+## 모듈
+
+```text
+src/
+├── index.ts                    stdio/HTTP 진입점
+├── version.ts
+├── tool-registry.ts            9개 도구의 단일 등록 지점
+├── lib/
+│   ├── fire-api-client.ts      소방청 API 호출·응답 통일
+│   ├── law-api-client.ts       법제처 검색·본문 호출
+│   ├── fetch-with-retry.ts     제한시간·재시도·키 마스킹
+│   ├── cache.ts                CacheStore + 인메모리 LRU
+│   ├── request-context.ts      요청별 정부 API 키 격리
+│   ├── korean-date.ts          Asia/Seoul 날짜
+│   └── xml.ts / format.ts / search-normalizer.ts / errors.ts
+├── tools/
+│   ├── fire-stats.ts / ems-stats.ts / fire-building.ts / hazmat.ts
+│   └── fire-law.ts / fire-precedents.ts / fire-admin-rules.ts
+├── server/
+│   ├── factory.ts              공유 API client와 MCP server 조립
+│   ├── http-server.ts          HTTP 라우트·인증·본문 한도
+│   ├── http-security.ts        Bearer 비교·보안 응답 헤더
+│   ├── rate-limit.ts           bounded fixed-window 호출 제한
+│   ├── chat-pipeline.ts        조회 우선 답변 흐름
+│   ├── query-router.ts         규칙 라우터
+│   ├── llm-router.ts           스키마 검증 LLM 라우터
+│   └── llm-adapter.ts          Gemini/Claude/OpenAI
+└── web/chat-page.ts            단일 페이지 채팅 UI
+```
+
+테스트는 구현 옆 `*.test.ts`에 둡니다. 저장소 버전·문서·런타임·필수 파일 일관성도
+`repository-readiness.test.ts`로 검사합니다.
+
+## 도구와 실제 범위
+
+| 분류 | 도구 | 입력·범위 핵심 |
 |---|---|---|
-| 언어/런타임 | TypeScript + Node.js | MCP SDK 성숙도 최고 |
-| 데이터 방식 | **API 실시간 호출** (DB 미배포) | 법령·통계는 원본이 계속 갱신됨. 재배포 책임 없음 |
-| 캐시 | **인메모리 LRU + TTL만** (SQLite 없음) | MVP에 디스크 캐시는 과설계. 단 `CacheStore` 인터페이스로 분리해두고, data.go.kr 일일 호출 한도가 실제 문제 되면 그때 SQLite 구현체로 교체 |
-| 인터페이스 | MCP stdio + Streamable HTTP (v0.3~) | 로컬 Claude 연동 + 기관 서버 배포·챗봇 |
-| 스키마 검증 | Zod → MCP JSON Schema 변환 | 타입 안전 + 런타임 검증 동시 확보 |
+| 화재 | `search_fire_stats` | 날짜. 소방관서별 접수·진행·오인 등 |
+| 구급 | `get_ems_stats` | 시도·연월. **교통사고 구급활동만** |
+| 대상물 | `search_fire_building` | 시도 필수, 건물명·사용승인연도 선택 |
+| 시설 | `get_building_facilities` | 시도 필수, 건물명·소방시설 선택 |
+| 법령 | `search_fire_law` | 법령명 또는 본문 검색, 약칭 지원 |
+| 조문 | `get_fire_law_text` | 법령명과 선택 조 번호 |
+| 판례 | `search_fire_precedents` | 법제처 판례 검색. 행정심판을 포함한다고 표시하지 않음 |
+| 행정규칙 | `search_fire_admin_rules` | 고시·훈령, NFPC·NFTC 이름/본문 |
+| 위험물 | `search_hazmat` | 물질명·CAS·UN. 목록 캐시 뒤 로컬 매칭 |
 
----
+## 데이터·캐시
 
-## High-Level 구조
+- 원천 데이터베이스를 저장소나 서버 디스크에 복제하지 않습니다.
+- `InMemoryLruCache`는 최대 100개 항목이며 서버 재시작 시 비워집니다.
+- 검색 1시간, 조문·시설·위험물 24시간, 확정 과거 통계 최대 7일 등 항목별 TTL을 사용합니다.
+- 빈 결과는 캐시하지 않아 원천 데이터 지연 중의 0건이 장시간 고정되지 않게 합니다.
+- 대상물/시설의 건물명 검색은 시도 전체를 1,000건 단위로 페이지 순회한 뒤 필터합니다.
 
-```
-┌──────────────────────────────────────────────────────┐
-│    MCP Client (Claude·ChatGPT) │ 브라우저 (챗봇)      │
-└───────────────┬──────────────────┬───────────────────┘
-           stdio 모드         HTTP 모드 (v0.3~)
-                │             GET / · POST /api/chat · /mcp
-┌───────────────▼──────────────────▼───────────────────┐
-│         korean-firefighter-law-mcp Server            │
-│                                                      │
-│  ┌────────────────────────────────────────────────┐  │
-│  │  HTTP 계층 (src/server/ + src/web/, v0.3~0.4)  │  │
-│  │  • http-server.ts   (Streamable HTTP stateless)│  │
-│  │  • factory.ts       (클라이언트·MCP 서버 조립)  │  │
-│  │  • chat-pipeline.ts (질문→조회→자료 기반 답변)  │  │
-│  │  • query-router.ts  (규칙 라우팅 — 폴백)        │  │
-│  │  • llm-router.ts    (LLM 질문 해석, 키 있을 때)│  │
-│  │  • llm-adapter.ts   (Gemini/Claude/GPT 택1)    │  │
-│  │  • web/chat-page.ts (챗봇 화면 HTML)           │  │
-│  └────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────┐  │
-│  │   Tool Registry (tool-registry.ts → allTools[])│  │
-│  │   통계(2)│시설(2)│법령·규칙(4)│위험물(1)      │  │
-│  └────────────────────────────────────────────────┘  │
-│                        ▲                             │
-│  ┌────────────────────────────────────────────────┐  │
-│  │            Shared Libraries (src/lib/)          │  │
-│  │  • fire-api-client.ts  (data.go.kr 소방청 API) │  │
-│  │  • law-api-client.ts   (법제처 API, 소방 프리셋)│  │
-│  │  • fetch-with-retry.ts (타임아웃+재시도+백오프) │  │
-│  │  • cache.ts            (CacheStore + 메모리LRU)│  │
-│  │  • request-context.ts  (요청별 인증키 격리)     │  │
-│  │  • xml.ts / format.ts  (XML 파싱·응답 포맷)    │  │
-│  │  • search-normalizer.ts / errors.ts            │  │
-│  └────────────────────────────────────────────────┘  │
-└──────────┬───────────────────────────┬───────────────┘
-           │ HTTPS                     │ HTTPS
-           ▼                           ▼
-┌─────────────────────┐   ┌─────────────────────────────┐
-│  공공데이터포털      │   │  법제처 국가법령정보 API      │
-│  (apis.data.go.kr)  │   │  (law.go.kr/DRF)            │
-├─────────────────────┤   ├─────────────────────────────┤
-│ 화재정보서비스        │   │ lawSearch.do (소방 법령 검색)│
-│ 구급통계서비스        │   │ lawService.do (조문 조회)    │
-│ 특정소방대상물정보    │   │ 판례·행정규칙 (소방 필터)     │
-│ 소방시설정보          │   └─────────────────────────────┘
-│ 국가위험물정보        │
-└─────────────────────┘
-```
+캐시는 최신성·호출량의 절충입니다. 법적 판단 전에 원천 시스템에서 현재 원문을 다시 확인합니다.
 
----
+## 인증과 보안 경계
 
-## 인증 (환경변수 2개)
+| 경계 | 현재 구현 | 운영 책임 |
+|---|---|---|
+| `/mcp` | `SERVER_AUTH_TOKEN` Bearer 선택 | 공개 시 반드시 토큰·HTTPS·접근제어 적용 |
+| `/api/chat` | `CHAT_AUTH_TOKEN` 또는 서버 토큰, IP 호출 제한 | 사용자별 인증이 필요하면 앞단 IdP/게이트웨이 추가 |
+| 정부 API 키 | 서버 env 또는 요청별 헤더, AsyncLocalStorage 격리 | 비밀 저장소·회수·프록시 로그 통제 |
+| 요청 크기 | chat 16KiB, MCP 4MiB | 앞단 프록시에도 더 작은 적정 한도 적용 |
+| LLM | 서버 env 키, 1회 기본 30초 제한 | 외부 전송·보존·국외이전·비용 정책 검토 |
 
-```bash
-# 공공데이터포털 인증키 — data.go.kr 회원가입 → 각 API 활용신청
-DATA_GO_KR_KEY=...
+`TRUST_PROXY=true`는 신뢰할 수 있는 프록시가 외부의 `X-Forwarded-For`를 제거하고 새로 설정할 때만
+사용합니다. 그렇지 않으면 클라이언트가 헤더를 위조해 호출 제한을 우회할 수 있습니다. limiter의 IP 저장소는
+10,000개 항목으로 제한되어 고유 IP 유입에 의한 무제한 메모리 증가를 막습니다.
 
-# 법제처 Open API 인증키 — open.law.go.kr 발급
-LAW_OC=...
-```
+키 마스킹은 애플리케이션이 만드는 URL 포함 오류에 적용됩니다. 상위 프록시·호스팅·운영체제 로그를
+자동으로 정리하지는 않습니다. `LAW_API_PROTOCOL=http`는 키를 평문 전송하므로 운영용 안전 대안이 아닙니다.
 
-로그인·세션 없음. 두 키 모두 URL 파라미터로 전달 (data.go.kr은 `serviceKey=`, 법제처는 `OC=`).
-로그·에러 메시지에서 키 마스킹 필수 (`maskSensitiveUrl`).
+## 네트워크 복원력
 
----
+- 기본 외부 호출 제한시간은 30초입니다.
+- 429/503/504와 서비스별 일시 오류를 지수 백오프로 재시도합니다.
+- 법제처에서 관측된 간헐 404는 법제처 호출에 한해 재시도합니다.
+- 빈 본문, HTML 점검 페이지, XML/JSON 오류 래퍼를 정상 데이터로 처리하지 않습니다.
+- `/health`는 현재 프로세스 생존만 확인하고 공공 API나 LLM의 정상 상태는 확인하지 않습니다.
 
-## 도구 세트 (9개)
+## 버전 변경 원칙
 
-### 통계 (data.go.kr)
-| 도구 | 하는 일 |
-|---|---|
-| `search_fire_stats` | 날짜·지역별 화재 발생 건수, 인명·재산 피해 조회 |
-| `get_ems_stats` | 시도본부·소방서·안전센터별 구급 출동 통계 |
-
-### 소방시설 (data.go.kr)
-| 도구 | 하는 일 |
-|---|---|
-| `search_fire_building` | 특정소방대상물(건물) 검색 — 이름·주소·용도별 |
-| `get_building_facilities` | 건물별 소방시설 현황·완공일·좌표 조회 |
-
-### 법령 (법제처, 소방 도메인 프리셋)
-| 도구 | 하는 일 |
-|---|---|
-| `search_fire_law` | 소방 법령 검색. 소방 6법 별칭 내장(아래) |
-| `get_fire_law_text` | 조문 단위 전문 조회 (`제10조` 등 지정) |
-| `search_fire_precedents` | 소방 관련 판례·행정심판 검색 |
-| `search_fire_admin_rules` | 행정규칙(고시·훈령) 검색 — 화재안전기준 NFPC·NFTC. 이름 0건 시 본문검색 폴백 (법령 검색도 동일) |
-
-### 위험물 (data.go.kr)
-| 도구 | 하는 일 |
-|---|---|
-| `search_hazmat` | 위험물 검색 — 물질명·CAS·UN번호로 품명(류별)·물성·대응요령. 목록 전체(약 7,300건) 1회 호출 후 24h 캐시 |
-
-소방 법령 별칭 프리셋 (`search-normalizer`에 내장):
-소방기본법 / 화재의 예방 및 안전관리에 관한 법률(화재예방법) /
-소방시설 설치 및 관리에 관한 법률(소방시설법) / 소방시설공사업법 /
-위험물안전관리법 / 119구조·구급에 관한 법률 / 소방공무원법 + 각 시행령·시행규칙
-
-### 체인 도구 (v0.2 — 보류, 미구현)
-| 도구 | 하는 일 |
-|---|---|
-| `check_building_compliance` | `get_building_facilities` + `get_fire_law_text` 결합: 건물 시설 현황 ↔ 법령 의무사항 대조 리포트 |
-
----
-
-## 디렉터리 구조
-
-```
-korean-firefighter-law-mcp/
-├── src/
-│   ├── index.ts              # 엔트리: stdio(기본) | --mode http
-│   ├── version.ts
-│   ├── tool-registry.ts      # allTools[] 중앙 등록 + Zod→JSON Schema 변환
-│   ├── lib/
-│   │   ├── fire-api-client.ts / law-api-client.ts
-│   │   ├── fetch-with-retry.ts / cache.ts / request-context.ts
-│   │   └── xml.ts / format.ts / search-normalizer.ts / errors.ts
-│   ├── tools/
-│   │   ├── fire-stats.ts / ems-stats.ts / fire-building.ts / hazmat.ts
-│   │   └── fire-law.ts / fire-precedents.ts / fire-admin-rules.ts
-│   ├── server/               # HTTP 모드 전용 (v0.3~0.4)
-│   │   ├── http-server.ts    # Streamable HTTP stateless (/ · /api/chat · /mcp)
-│   │   ├── factory.ts        # 클라이언트·MCP 서버 조립
-│   │   ├── chat-pipeline.ts  # 질문 → 무조건 조회 → 자료 기반 답변
-│   │   ├── query-router.ts   # 규칙 라우팅 (LLM 없음·실패 시 폴백)
-│   │   ├── llm-router.ts     # LLM 라우팅 — 질문을 도구+인자 JSON으로 해석
-│   │   └── llm-adapter.ts    # Gemini/Claude/GPT 키 자동 감지
-│   └── web/
-│       └── chat-page.ts      # 챗봇 화면 (단일 HTML 문자열)
-├── .env.example
-├── Dockerfile
-├── package.json / tsconfig.json
-└── README.md / DEPLOY.md / ARCHITECTURE.md / 기준.md
-```
-
-테스트는 별도 `test/` 폴더 없이 소스 옆 `*.test.ts`로 병치한다 (vitest).
-
-원칙:
-1. Tools → Shared Libs → API Client 단방향 의존
-2. 파일당 200줄 미만, 단일 책임
-3. 도구는 `{ name, description, schema, handler }`로 `allTools[]`에만 등록
-4. TypeScript strict + Zod 검증
-
----
-
-## 네트워크 방어층
-
-| 문제 | 대응 |
-|---|---|
-| 법제처 DRF 간헐 404 (버스트 스로틀) | 404/429/503/504 재시도 + exponential backoff |
-| 법제처 `Referer` 없는 요청 거부 | law.go.kr 호출 시 기본 Referer 자동 주입 |
-| 200 상태에 빈 본문/HTML 점검 페이지 | 빈/HTML 응답 감지 → 재시도 → 명확한 에러 메시지 |
-| data.go.kr 일일 호출 한도 (1천~1만/일) | 캐시 TTL 차등: 검색 1h / 조문 24h / **확정 연도 통계 7d** |
-| API 키 로그 유출 | 에러·로그 URL에서 `serviceKey=***`, `OC=***` 마스킹 |
-
----
-
-## 캐시 전략
-
-```typescript
-interface CacheStore {
-  get<T>(key: string): T | undefined
-  set<T>(key: string, data: T, ttlMs: number): void
-}
-```
-
-- 현행: `InMemoryLruCache` (최대 100건)
-- TTL: 법령 검색 1시간 / 조문 24시간 / 시설정보 24시간 / 과거 연도 확정 통계 7일
-- SQLite는 **일일 호출 한도가 실측으로 문제 될 때만** `SqliteCacheStore`로 추가.
-  도구·클라이언트 코드는 인터페이스만 보므로 교체 비용 0
-
----
-
-## 로드맵
-
-- **v0.1 (MVP)** ✅: stdio MCP + 도구 7개 + 인메모리 캐시 + 재시도 방어층
-- **v0.3 (HTTP)** ✅: Streamable HTTP stateless 서버 + 요청별 키 격리(AsyncLocalStorage) + Bearer 토큰 보호 + Docker/DEPLOY.md 인수인계 패키지 — ChatGPT·Claude 커넥터 연결 가능
-- **v0.4 (챗봇)** ✅: 소방관용 챗봇 페이지(`/`) + 질문→무조건 조회→자료 기반 답변 파이프라인 + LLM 3사 어댑터 (키 없으면 조회 모드)
-- **LLM 라우팅** ✅ 구현: LLM 키가 있으면 질문 해석(도구·인자 선택)도 LLM이 담당 — 도구 스키마·법령 사전을 프롬프트로 주입, 실패·무키 시 규칙 라우터 폴백. 실 LLM 라우팅 품질은 키 발급 후 확인 필요
-- **v0.2 (보류)**: `check_building_compliance` 체인 도구, CLI 인터페이스, 별표/서식 조회 — 실데이터 검증(키 발급) 후 진행
-- **이후**: 필요 시 SQLite 캐시 (`CacheStore` 교체)
+- 모든 도구는 `allTools[]`에만 등록합니다.
+- 사용자 의도를 먼저 실패 테스트로 만들고 수정 뒤 전체 `npm run verify`를 통과합니다.
+- 모델명·요금·제품 UI·API 승인/호출 한도 같은 외부 사실은 공식 문서에서 확인하고, 확인하지 못하면
+  완료로 쓰지 않습니다.
+- 외부 API 실연동, LLM 실호출, Docker 빌드, 원격 MCP 제품 연결은 해당 자격증명·환경에서 별도 검증하고
+  검증일과 범위를 [기준.md](기준.md)에 기록합니다.
