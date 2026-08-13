@@ -15,6 +15,11 @@ describe("routeQuestion — 질문이 반드시 올바른 조회로 이어진다
     expect(r.args.jo).toBe("10의2")
   })
 
+  it("제 없는 10조와 시행령 꼬리를 보존한다", () => {
+    const r = routeQuestion("화재예방법 시행령 5조 알려줘")
+    expect(r).toEqual({ tool: "get_fire_law_text", args: { lawName: "화재예방법 시행령", jo: "5" } })
+  })
+
   it("법령명만 → 법령 검색", () => {
     const r = routeQuestion("위험물안전관리법 검색해줘")
     expect(r.tool).toBe("search_fire_law")
@@ -30,6 +35,11 @@ describe("routeQuestion — 질문이 반드시 올바른 조회로 이어진다
     const r = routeQuestion("아세톤 위험물이야?")
     expect(r.tool).toBe("search_hazmat")
     expect(r.args.query).toBe("아세톤")
+  })
+
+  it("번호라는 말이 없어도 UN·CAS 식별자를 위험물 검색으로 보낸다", () => {
+    expect(routeQuestion("UN 1090")).toEqual({ tool: "search_hazmat", args: { query: "1090" } })
+    expect(routeQuestion("CAS 67-64-1")).toEqual({ tool: "search_hazmat", args: { query: "67-64-1" } })
   })
 
   it("위험물'법' 질문은 물질 검색이 아니라 법령으로 간다", () => {
@@ -95,6 +105,10 @@ describe("routeQuestion — 질문이 반드시 올바른 조회로 이어진다
     const r = routeQuestion("서울 호텔 스프링클러")
     expect(r.tool).toBe("get_building_facilities")
     expect(r.args).toMatchObject({ sido: "서울특별시", buildingName: "호텔" })
+  })
+
+  it("시설 질문의 종결어를 건물명으로 오인하지 않는다", () => {
+    expect(routeQuestion("서울 호텔 스프링클러 있나").args.buildingName).toBe("호텔")
   })
 
   it("지역명과 겹치거나 다른 지역 글자가 든 건물명을 훼손하지 않는다", () => {

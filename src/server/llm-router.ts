@@ -11,6 +11,8 @@ import { FIRE_LAWS, FIRE_LAW_ALIASES } from "../lib/search-normalizer.js"
 import { koreanDate } from "../lib/korean-date.js"
 import type { LlmAdapter } from "./llm-adapter.js"
 import type { RoutedQuery } from "./query-router.js"
+import { extractFirstJsonObject } from "../lib/json-extract.js"
+import { maskSensitiveUrl } from "../lib/fetch-with-retry.js"
 
 function routingPrompt(today: string): string {
   const catalog = allTools
@@ -32,19 +34,27 @@ ${catalog}
 - 어느 도구인지 확신이 없으면 {"tool":"search_fire_law","args":{"query":"핵심 키워드"}}`
 }
 
-export async function llmRoute(message: string, adapter: LlmAdapter): Promise<RoutedQuery | null> {
+export async function llmRoute(
+  message: string,
+  adapter: LlmAdapter,
+  history: ReadonlyArray<{ role: string; text: string }> = []
+): Promise<RoutedQuery | null> {
   try {
     const today = koreanDate().iso
-    const raw = await adapter.generate(routingPrompt(today), `질문: ${message}`)
-    const m = raw.match(/\{[\s\S]*\}/)
-    if (!m) return null
-    const json = JSON.parse(m[0]) as { tool?: unknown; args?: unknown }
+    const context = history.length
+      ? `[직전 대화]\n${history.slice(-8).map((m) => `${m.role}: ${m.text}`).join("\n")}\n\n`
+      : ""
+    const raw = await adapter.generate(routingPrompt(today), `${context}질문: ${message}`)
+    const json = extractFirstJsonObject(raw) as { tool?: unknown; args?: unknown } | null
+    if (!json) return null
     const tool = allTools.find((t) => t.name === json.tool)
     if (!tool) return null
     const parsed = tool.schema.safeParse(json.args ?? {})
     if (!parsed.success) return null
     return { tool: tool.name, args: parsed.data as Record<string, unknown> }
-  } catch {
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    console.error("LLM 라우팅 실패, 규칙 라우터 사용:", maskSensitiveUrl(detail))
     return null
   }
 }

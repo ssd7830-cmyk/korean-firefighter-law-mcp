@@ -2,7 +2,7 @@
 
 > 현행 v0.6.0 · 2026-08-13
 
-소방청·법제처 API를 9개 읽기 전용 MCP 도구로 묶고, 같은 도구 위에 선택형 웹 채팅을 제공합니다.
+소방청·법제처 API를 11개 읽기 전용 MCP 도구로 묶고, 같은 도구 위에 선택형 웹 채팅을 제공합니다.
 
 ## 두 배포 형태
 
@@ -24,7 +24,7 @@
 ```
 
 - stdio는 AI 클라이언트가 로컬 프로세스를 실행합니다. 웹 채팅과 서버 내 LLM 어댑터는 사용하지 않습니다.
-- HTTP는 `GET /`, `POST /api/chat`, `POST /mcp`, `GET /health`를 제공합니다.
+- HTTP는 `GET /`, `POST /api/chat`, `POST /mcp`, `GET /health`, `GET /status`를 제공합니다.
 - HTTP의 MCP는 요청마다 서버/transport를 만드는 stateless JSON 응답 방식입니다. GET SSE 세션은 제공하지 않습니다.
 - ChatGPT는 로컬 stdio에 직접 연결하지 않습니다. 원격 제품 호환성은 배포 제품에서 별도 종단간 검증합니다.
 
@@ -43,10 +43,10 @@
 2. LLM 키가 있으면 LLM이 도구명·인자 JSON만 고릅니다. 실패하거나 잘못된 JSON이면 규칙 라우터로 전환합니다.
 3. 선택된 도구로 공식 API를 먼저 조회합니다. 조회가 실패하면 답변 생성을 하지 않습니다.
 4. LLM 키가 없으면 조회 원문을 반환합니다.
-5. LLM 키가 있으면 조회 자료 안에서만 요약하도록 요청하고, AI 요약 아래 공식 조회 원문을 붙입니다.
+5. LLM 키가 있으면 관련 근거를 원문 그대로 고르게 하고, 서버가 정확한 부분문자열 일치를 검증한 뒤 원문과 함께 표시합니다.
 
-LLM은 정부 API의 사실 자료를 대신 만들 수 없지만 자료를 잘못 요약할 수 있습니다. 원문 병기는 검토 수단이지
-요약의 정확성을 보증하지 않습니다.
+자유 생성 요약은 표시하지 않으므로 원문에 없는 문장을 차단합니다. 다만 어떤 구절을 선택했는지와 원천 API
+자체의 최신성·완전성은 별도 검토 대상입니다.
 
 ## 모듈
 
@@ -54,7 +54,7 @@ LLM은 정부 API의 사실 자료를 대신 만들 수 없지만 자료를 잘�
 src/
 ├── index.ts                    stdio/HTTP 진입점
 ├── version.ts
-├── tool-registry.ts            9개 도구의 단일 등록 지점
+├── tool-registry.ts            11개 도구의 단일 등록 지점
 ├── lib/
 │   ├── fire-api-client.ts      소방청 API 호출·응답 통일
 │   ├── law-api-client.ts       법제처 검색·본문 호출
@@ -68,13 +68,13 @@ src/
 │   └── fire-law.ts / fire-precedents.ts / fire-admin-rules.ts
 ├── server/
 │   ├── factory.ts              공유 API client와 MCP server 조립
-│   ├── http-server.ts          HTTP 라우트·인증·본문 한도
+│   ├── http-server.ts/http-body.ts HTTP 라우트·인증·본문 한도
 │   ├── http-security.ts        Bearer 비교·보안 응답 헤더
 │   ├── rate-limit.ts           bounded fixed-window 호출 제한
 │   ├── chat-pipeline.ts        조회 우선 답변 흐름
 │   ├── query-router.ts         규칙 라우터
 │   ├── llm-router.ts           스키마 검증 LLM 라우터
-│   └── llm-adapter.ts          Gemini/Claude/OpenAI
+│   └── llm-adapter.ts/cli-llm-adapter.ts API 및 제한된 로컬 CLI 어댑터
 └── web/chat-page.ts            단일 페이지 채팅 UI
 ```
 
@@ -91,8 +91,10 @@ src/
 | 시설 | `get_building_facilities` | 시도 필수, 건물명·소방시설 선택 |
 | 법령 | `search_fire_law` | 법령명 또는 본문 검색, 약칭 지원 |
 | 조문 | `get_fire_law_text` | 법령명과 선택 조 번호 |
+| 별표 | `get_fire_law_annex` | 법령명/MST, 별표 번호, 별표 내 키워드 |
 | 판례 | `search_fire_precedents` | 법제처 판례 검색. 행정심판을 포함한다고 표시하지 않음 |
 | 행정규칙 | `search_fire_admin_rules` | 고시·훈령, NFPC·NFTC 이름/본문 |
+| 행정규칙 원문 | `get_fire_admin_rule_text` | 행정규칙 ID/명칭, 절 번호·키워드 |
 | 위험물 | `search_hazmat` | 물질명·CAS·UN. 목록 캐시 뒤 로컬 매칭 |
 
 ## 데이터·캐시
@@ -101,7 +103,8 @@ src/
 - `InMemoryLruCache`는 최대 100개 항목이며 서버 재시작 시 비워집니다.
 - 검색 1시간, 조문·시설·위험물 24시간, 확정 과거 통계 최대 7일 등 항목별 TTL을 사용합니다.
 - 빈 결과는 캐시하지 않아 원천 데이터 지연 중의 0건이 장시간 고정되지 않게 합니다.
-- 대상물/시설의 건물명 검색은 시도 전체를 1,000건 단위로 페이지 순회한 뒤 필터합니다.
+- 대상물/시설의 건물명 검색은 신뢰할 수 없는 `totalCount` 대신 짧은 페이지가 나올 때까지 1,000건 단위로
+  순회하고, 반복 페이지·최대 페이지 보호 후 필터합니다.
 
 캐시는 최신성·호출량의 절충입니다. 법적 판단 전에 원천 시스템에서 현재 원문을 다시 확인합니다.
 
@@ -112,7 +115,7 @@ src/
 | `/mcp` | `SERVER_AUTH_TOKEN` Bearer 선택 | 공개 시 반드시 토큰·HTTPS·접근제어 적용 |
 | `/api/chat` | `CHAT_AUTH_TOKEN` 또는 서버 토큰, IP 호출 제한 | 사용자별 인증이 필요하면 앞단 IdP/게이트웨이 추가 |
 | 정부 API 키 | 서버 env 또는 요청별 헤더, AsyncLocalStorage 격리 | 비밀 저장소·회수·프록시 로그 통제 |
-| 요청 크기 | chat 16KiB, MCP 4MiB | 앞단 프록시에도 더 작은 적정 한도 적용 |
+| 요청 크기 | chat 64KiB(최근 문맥 8개), MCP 4MiB | 앞단 프록시에도 더 작은 적정 한도 적용 |
 | LLM | 서버 env 키, 1회 기본 30초 제한 | 외부 전송·보존·국외이전·비용 정책 검토 |
 
 `TRUST_PROXY=true`는 신뢰할 수 있는 프록시가 외부의 `X-Forwarded-For`를 제거하고 새로 설정할 때만
@@ -121,6 +124,8 @@ src/
 
 키 마스킹은 애플리케이션이 만드는 URL 포함 오류에 적용됩니다. 상위 프록시·호스팅·운영체제 로그를
 자동으로 정리하지는 않습니다. `LAW_API_PROTOCOL=http`는 키를 평문 전송하므로 운영용 안전 대안이 아닙니다.
+기본 `HOST`는 `127.0.0.1`이며 외부 주소는 MCP·chat 접속 토큰 없이는 시작을 거부합니다. 브라우저 대화는
+장기 `localStorage`가 아닌 현재 탭의 `sessionStorage`에만 저장합니다.
 
 ## 네트워크 복원력
 

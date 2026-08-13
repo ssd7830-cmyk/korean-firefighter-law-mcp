@@ -1,16 +1,19 @@
 /**
  * LLM 어댑터 — 받는 쪽이 키만 꽂으면 아무 LLM이나 붙는 구조
  *
- * 선택: LLM_PROVIDER=gemini|claude|openai (미지정 시 키가 있는 provider 자동 감지)
+ * 선택: LLM_PROVIDER=gemini|claude|openai|claude-cli|codex-cli (미지정 시 키가 있는 provider 자동 감지)
  * 키:   GEMINI_API_KEY | ANTHROPIC_API_KEY | OPENAI_API_KEY
+ *       claude-cli/codex-cli는 API 키 없이 로컬에 설치·로그인된 CLI 계정을 사용한다.
  * 모델: LLM_MODEL (미지정 시 provider별 기본값)
- * 키가 하나도 없으면 null → 챗봇은 "조회 모드"로 동작 (조회 결과 원문 표시)
+ * 아무것도 지정하지 않으면 null → 챗봇은 "조회 모드"로 동작 (조회 결과 원문 표시)
  */
 
 import Anthropic from "@anthropic-ai/sdk"
+import { claudeCliAdapter, codexCliAdapter } from "./cli-llm-adapter.js"
 
 export interface LlmAdapter {
   name: string
+  model?: string
   generate(system: string, user: string): Promise<string>
 }
 
@@ -23,6 +26,7 @@ function geminiAdapter(): LlmAdapter {
   const model = process.env.LLM_MODEL || "gemini-3.6-flash"
   return {
     name: "gemini",
+    model,
     async generate(system, user) {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -48,10 +52,11 @@ function geminiAdapter(): LlmAdapter {
 }
 
 function claudeAdapter(): LlmAdapter {
-  const model = process.env.LLM_MODEL || "claude-haiku-4-5"
+  const model = process.env.LLM_MODEL || "claude-sonnet-5"
   const client = new Anthropic({ timeout: llmTimeoutMs() })
   return {
     name: "claude",
+    model,
     async generate(system, user) {
       const res = await client.messages.create({
         model,
@@ -74,6 +79,7 @@ function openaiAdapter(): LlmAdapter {
   const model = process.env.LLM_MODEL || "gpt-5.6-luna"
   return {
     name: "openai",
+    model,
     async generate(system, user) {
       const res = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
@@ -121,9 +127,13 @@ export function createLlmAdapter(): LlmAdapter | null {
     case "openai":
       if (!process.env.OPENAI_API_KEY) throw new Error("LLM_PROVIDER=openai에는 OPENAI_API_KEY가 필요합니다.")
       return openaiAdapter()
+    case "claude-cli":
+      return claudeCliAdapter() // API 키 없이 로컬 Claude Code 구독 사용
+    case "codex-cli":
+      return codexCliAdapter() // API 키 없이 로컬 Codex 로그인 사용
     case "":
       return null // 조회 모드
     default:
-      throw new Error("LLM_PROVIDER는 gemini, claude, openai 중 하나여야 합니다.")
+      throw new Error("LLM_PROVIDER는 gemini, claude, openai, claude-cli, codex-cli 중 하나여야 합니다.")
   }
 }

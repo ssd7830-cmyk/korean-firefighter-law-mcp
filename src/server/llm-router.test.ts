@@ -26,6 +26,21 @@ describe("llmRoute — LLM이 질문을 도구·인자로 변환, 모든 실패�
     expect(r?.tool).toBe("search_fire_law")
   })
 
+  it("문자열 안 중괄호와 뒤쪽 설명이 있어도 첫 JSON 객체만 안전하게 읽는다", async () => {
+    const r = await llmRoute("질문", mock('앞말 {"tool":"search_fire_law","args":{"query":"{소방}"}} 뒷말 {깨짐}'))
+    expect(r?.args.query).toBe("{소방}")
+  })
+
+  it("직전 대화 문맥을 지시어 라우팅 프롬프트에 넣는다", async () => {
+    let user = ""
+    await llmRoute("그중 3번", { name: "spy", generate: async (_system, value) => {
+      user = value
+      return '{"tool":"search_fire_law","args":{"query":"소방"}}'
+    } }, [{ role: "assistant", text: "1. A 2. B 3. C" }])
+    expect(user).toContain("[직전 대화]")
+    expect(user).toContain("3. C")
+  })
+
   it("미등록 도구 → null (LLM이 없는 도구를 지어내도 차단)", async () => {
     expect(await llmRoute("질문", mock('{"tool":"hack_tool","args":{}}'))).toBeNull()
   })

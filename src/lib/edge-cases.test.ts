@@ -15,10 +15,12 @@ describe("최종 소탕 — 경계값·오류 경로", () => {
     expect(text).toContain("외 10건 생략")
   })
 
-  it("페이지 밖 결과까지 포함한 전체건수 기준으로 생략 수를 표시한다", () => {
+  it("신뢰할 수 없는 totalCount를 전체건수로 오인하지 않는다", () => {
     const items = Array.from({ length: 100 }, (_, i) => ({ n: i }))
     const text = formatBody({ items: { item: items }, totalCount: 179 }, "제목")
-    expect(text).toContain("외 129건 생략")
+    expect(text).toContain("조회 100건")
+    expect(text).toContain("외 50건 생략")
+    expect(text).not.toContain("179")
   })
 
   it("정확히 한도 길이면 자르지 않는다", () => {

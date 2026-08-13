@@ -8,6 +8,7 @@
 - `POST /api/chat` — 기관 서비스가 호출할 자연어 질의 API
 - `POST /mcp` — 원격 Streamable HTTP MCP
 - `GET /health` — 생존 확인
+- `GET /status` — 조회/LLM 모드와 실제 공급자·모델 확인
 
 각 PC에 설치하려면 [LOCAL_SETUP.md](LOCAL_SETUP.md)를 사용합니다.
 
@@ -68,6 +69,7 @@ curl http://127.0.0.1:8080/health
 
 정상이면 `ok`를 반환합니다. 예시는 호스트의 루프백에만 바인딩합니다. Nginx·기관 로드밸런서 등에서
 TLS를 종료하고 인증·접근제어를 적용한 뒤 외부에 노출합니다. 서버 자체는 TLS를 제공하지 않습니다.
+컨테이너 내부는 `HOST=0.0.0.0`으로 수신하며, 외부 주소 수신은 접속 토큰이 없으면 시작 단계에서 거부됩니다.
 
 Docker를 쓰지 않는 시험 환경에서는 Node.js 22 이상으로 `npm ci`, `npm run verify` 후 아래처럼 실행합니다.
 
@@ -86,28 +88,35 @@ node build/index.js --mode http
 | 변수 | 공급자 | 현재 기본 모델 |
 |---|---|---|
 | `GEMINI_API_KEY` | [Gemini 모델 문서](https://ai.google.dev/gemini-api/docs/latest-model) | `gemini-3.6-flash` |
-| `ANTHROPIC_API_KEY` | [Claude 모델 문서](https://platform.claude.com/docs/en/about-claude/models/overview) | `claude-haiku-4-5` |
+| `ANTHROPIC_API_KEY` | [Claude 모델 문서](https://platform.claude.com/docs/en/about-claude/models/overview) | `claude-sonnet-5` |
 | `OPENAI_API_KEY` | [OpenAI 모델 문서](https://developers.openai.com/api/docs/models/all) | `gpt-5.6-luna` |
 
 여러 키가 있으면 `LLM_PROVIDER=gemini|claude|openai`로 선택하고, `LLM_MODEL`로 기관이 검증한 모델 ID를
 고정할 수 있습니다. 모델 수명과 가격은 자주 바뀌므로 공급자의 현재 모델·가격·데이터 통제 문서를 기준으로
 예산과 갱신 일정을 정합니다. 질문 1건은 라우팅과 답변에 최대 2회 LLM 호출을 사용합니다.
 
-LLM을 켠 경우에도 AI 요약과 공식 조회 원문을 함께 표시합니다. 이는 요약 오류 가능성을 낮추기 위한 보조
-장치이며 AI 요약 자체가 공식 해석이 되는 것은 아닙니다.
+LLM을 켜도 자유 요약문은 표시하지 않습니다. 모델은 관련 근거 구절만 고르고, 서버가 조회 원문과 글자 단위로
+일치하는 구절만 통과시킵니다. 공식 조회 원문도 함께 표시하며 이 결과 역시 기관의 공식 해석은 아닙니다.
+
+로컬 개발·시연에는 `LLM_PROVIDER=claude-cli` 또는 `codex-cli`를 명시할 수 있습니다. CLI 질문은 stdin으로
+전달되고 세션 비저장·제한 모드로 실행되지만, 개인 로그인을 공유하는 방식이므로 기관 서버 운영은 위 API
+키 방식으로 배포합니다. Codex 비대화형 실행 플래그는 [공식 OpenAI CLI 명령 문서](https://developers.openai.com/codex/cli/reference)를 따릅니다.
 
 ## 5. 환경변수
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `PORT` | `8080` | HTTP 포트. 1~65535 정수를 사용 |
+| `HOST` | `127.0.0.1` | 수신 주소. 외부 주소는 인증 토큰 필수 |
 | `SERVER_AUTH_TOKEN` | 없음 | `/mcp` Bearer 토큰 |
 | `CHAT_AUTH_TOKEN` | `SERVER_AUTH_TOKEN` | `/api/chat` 전용 Bearer 토큰 |
 | `CHAT_RATE_LIMIT_PER_MINUTE` | `60` | 식별 IP별 고정 1분 구간 요청 한도 |
 | `TRUST_PROXY` | `false` | 신뢰할 수 있는 프록시 뒤에서만 `true`; 첫 `X-Forwarded-For`를 사용 |
-| `LLM_PROVIDER` | 키 자동감지 | `gemini`, `claude`, `openai` 중 하나 |
+| `LLM_PROVIDER` | 키 자동감지 | `gemini`, `claude`, `openai`, 개발용 `claude-cli`, `codex-cli` |
 | `LLM_MODEL` | 공급자별 위 표 | 사용할 모델 ID |
 | `LLM_TIMEOUT_MS` | `30000` | LLM 1회 호출 제한시간(ms) |
+| `LLM_MAX_CONCURRENCY` | `2` | 동시에 실행할 LLM/CLI 호출 수 |
+| `LLM_MAX_QUEUE` | `20` | 대기시킬 최대 LLM/CLI 요청 수 |
 | `FIRE_BUILDING_OP` | 코드 기본값 | 대상물 API 오퍼레이션 변경 시 대체 |
 | `FIRE_FACILITY_OP` | 코드 기본값 | 시설 API 오퍼레이션 변경 시 대체 |
 | `LAW_REFERER` | `https://www.law.go.kr/` | 법제처 요청 Referer |
@@ -130,7 +139,7 @@ MCP URL은 `https://기관주소/mcp`입니다.
   지원되지 않으면 기관 OAuth/OIDC 게이트웨이를 앞단에 두거나, 해당 제품이 제공하는 보안 터널·보관소 방식을
   별도로 구현해야 합니다.
 
-따라서 URL 입력만으로 연동 완료라고 간주하지 않습니다. 도구 9개 스캔, 인증 실패/만료, 실제 도구 호출,
+따라서 URL 입력만으로 연동 완료라고 간주하지 않습니다. 도구 11개 스캔, 인증 실패/만료, 실제 도구 호출,
 권한 회수까지 시험해야 합니다.
 
 ## 7. 배포 전 검증
@@ -149,6 +158,7 @@ curl http://127.0.0.1:8080/health
 4. `인천 2025년 1월 교통사고 구급 통계` — `인천소방본부` 매핑과 교통사고 범위 표시
 5. `광주 2026년 8월 교통사고 구급 통계` — 통합 후 본부명이 실제 API에서 조회되는지 확인
 6. 기관이 실제로 쓸 건물·시설 질문 — 시도 전체 페이지 검색과 시설 라우팅 확인
+7. `아파트 스프링클러 설치 기준` — 시행령 별표 4, NFPC 103, NFTC 103 원문이 함께 조회되는지 확인
 
 실패 응답, 빈 결과, 최근 데이터 지연은 자동 테스트만으로 판정할 수 없습니다. 원천 API 페이지·활용승인·
 트래픽과 비교하고 검증일·질문·결과를 [기준.md](기준.md)에 남깁니다.

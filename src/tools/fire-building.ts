@@ -37,14 +37,19 @@ async function fetchAllForKeyword(
   keyword: string
 ): Promise<DataGoKrBody> {
   const numOfRows = 1000
-  const first = await client.call(service, operation, { ...params, pageNo: 1, numOfRows }, TTL.ARTICLE)
-  const total = Number(first.totalCount) || toArray(first.items?.item).length
-  const items = [...toArray<Record<string, unknown>>(first.items?.item as any)]
-  for (let pageNo = 2; pageNo <= Math.ceil(total / numOfRows); pageNo++) {
+  const items: Record<string, unknown>[] = []
+  let previousSignature = ""
+  // totalCount가 페이지 건수로 오는 서비스라서 짧은 페이지가 나올 때까지 읽는다.
+  for (let pageNo = 1; pageNo <= 100; pageNo++) {
     const page = await client.call(service, operation, { ...params, pageNo, numOfRows }, TTL.ARTICLE)
-    items.push(...toArray<Record<string, unknown>>(page.items?.item as any))
+    const pageItems = toArray<Record<string, unknown>>(page.items?.item as any)
+    const signature = JSON.stringify(pageItems.slice(0, 2))
+    if (pageNo > 1 && pageItems.length > 0 && signature === previousSignature) break
+    items.push(...pageItems)
+    if (pageItems.length < numOfRows) break
+    previousSignature = signature
   }
-  return filterBodyByKeyword({ items: { item: items }, totalCount: total }, keyword)
+  return filterBodyByKeyword({ items: { item: items }, totalCount: items.length }, keyword)
 }
 
 export async function searchFireBuilding(client: FireApiClient, args: SearchFireBuildingInput): Promise<ToolResult> {

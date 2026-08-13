@@ -5,7 +5,7 @@ describe("formatBody", () => {
   it("단일 객체 item(XML 변환 특성)도 1건으로 출력한다", () => {
     const body = { items: { item: { name: "서울소방서", cnt: "3" } }, totalCount: "1" }
     const text = formatBody(body, "제목")
-    expect(text).toContain("전체 1건")
+    expect(text).toContain("조회 1건")
     expect(text).toContain("서울소방서")
   })
 
@@ -31,7 +31,7 @@ describe("filterBodyByKeyword", () => {
     const filtered = filterBodyByKeyword(body, "롯데")
     expect(filtered.totalCount).toBe(2)
     const text = formatBody(filtered, "제목")
-    expect(text).toContain("전체 2건")
+    expect(text).toContain("조회 2건")
     expect(text).not.toContain("시청사")
   })
 

@@ -3,7 +3,7 @@ import type { FireApiClient } from "../lib/fire-api-client.js"
 import { TTL } from "../lib/cache.js"
 import { toArray } from "../lib/xml.js"
 import { formatBody } from "../lib/format.js"
-import { textResult, type ToolResult } from "../lib/errors.js"
+import { emptyResult, textResult, type ToolResult } from "../lib/errors.js"
 
 const SVC = "materialInfoSvc"
 
@@ -24,7 +24,7 @@ export async function searchHazmat(client: FireApiClient, args: SearchHazmatInpu
   const q = args.query.trim()
   const matches = all.filter((m) => (m.chemicalname ?? "").includes(q) || m.casno === q || m.unno === q)
   if (matches.length === 0) {
-    return textResult(`"${q}" 위험물 검색 결과 없음. 물질명(예: 아세톤)이나 CAS 번호로 다시 시도하세요.`)
+    return emptyResult(`"${q}" 위험물 검색 결과 없음. 물질명(예: 아세톤)이나 CAS 번호로 다시 시도하세요.`)
   }
 
   const exact = matches.find((m) => m.chemicalname === q) ?? (matches.length === 1 ? matches[0] : undefined)

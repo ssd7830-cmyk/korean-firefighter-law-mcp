@@ -90,9 +90,9 @@ describe("HTTP 모드 — stateless MCP 서버", () => {
     expect(json.result.serverInfo.name).toBe("korean-firefighter-law-mcp")
   })
 
-  it("tools/list가 도구 9개를 반환한다 (사전 initialize 없는 독립 요청)", async () => {
+  it("tools/list가 도구 11개를 반환한다 (사전 initialize 없는 독립 요청)", async () => {
     const json = await postMcp(rpc(2, "tools/list", {}))
-    expect(json.result.tools.length).toBe(9)
+    expect(json.result.tools.length).toBe(11)
   })
 
   it("GET은 405 (stateless — SSE 스트림 미지원)", async () => {
@@ -179,11 +179,11 @@ describe("챗봇 라우트", () => {
     expect(res.status).toBe(400)
   })
 
-  it("챗봇 요청 본문이 16KB를 넘으면 413", async () => {
+  it("대화 문맥을 포함한 챗봇 요청 본문이 64KB를 넘으면 413", async () => {
     const res = await fetch(`${urlBase}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: "가".repeat(20_000) }),
+      body: JSON.stringify({ message: "질문", history: [{ role: "user", text: "가".repeat(70_000) }] }),
     })
     expect(res.status).toBe(413)
   })

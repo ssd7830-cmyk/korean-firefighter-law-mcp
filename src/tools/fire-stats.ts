@@ -12,7 +12,7 @@ export const SearchFireStatsSchema = z.object({
     .refine(isValidCompactDate, "유효한 YYYYMMDD 날짜")
     .describe("발생일자 (YYYYMMDD, 예: 20250315)"),
   pageNo: z.number().int().min(1).default(1).describe("페이지 번호"),
-  numOfRows: z.number().int().min(1).max(1000).default(100).describe("결과 수 (최대 1000)"),
+  numOfRows: z.number().int().min(1).max(1000).default(1000).describe("결과 수 (기본·최대 1000, 일자 결과 누락 방지)"),
 })
 
 export type SearchFireStatsInput = z.infer<typeof SearchFireStatsSchema>

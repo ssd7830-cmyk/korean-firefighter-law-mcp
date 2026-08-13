@@ -18,9 +18,15 @@ import {
   getBuildingFacilities,
   GetBuildingFacilitiesSchema,
 } from "./tools/fire-building.js"
-import { searchFireLaw, SearchFireLawSchema, getFireLawText, GetFireLawTextSchema } from "./tools/fire-law.js"
+import {
+  searchFireLaw, SearchFireLawSchema, getFireLawText, GetFireLawTextSchema,
+  getFireLawAnnex, GetFireLawAnnexSchema,
+} from "./tools/fire-law.js"
 import { searchFirePrecedents, SearchFirePrecedentsSchema } from "./tools/fire-precedents.js"
-import { searchFireAdminRules, SearchFireAdminRulesSchema } from "./tools/fire-admin-rules.js"
+import {
+  searchFireAdminRules, SearchFireAdminRulesSchema,
+  getFireAdminRuleText, GetFireAdminRuleTextSchema,
+} from "./tools/fire-admin-rules.js"
 import { searchHazmat, SearchHazmatSchema } from "./tools/hazmat.js"
 
 export interface Clients {
@@ -73,6 +79,12 @@ export const allTools: McpTool[] = [
     handler: (c, a) => getFireLawText(c.law, GetFireLawTextSchema.parse(a)),
   },
   {
+    name: "get_fire_law_annex",
+    description: "소방 법령 시행령 등의 별표 원문 조회. 별표 번호와 키워드로 적용 대상·시설 기준 확인",
+    schema: GetFireLawAnnexSchema,
+    handler: (c, a) => getFireLawAnnex(c.law, GetFireLawAnnexSchema.parse(a)),
+  },
+  {
     name: "search_fire_precedents",
     description: "소방 관련 판례 검색 (법제처). 소방시설·위험물·소방공무원 관련 재판례",
     schema: SearchFirePrecedentsSchema,
@@ -84,6 +96,12 @@ export const allTools: McpTool[] = [
       "소방 행정규칙(고시·훈령) 검색 (법제처). 스프링클러·경보설비 등 소방시설 설치 기준의 본체인 화재안전성능기준(NFPC)·화재안전기술기준(NFTC)이 여기 있음",
     schema: SearchFireAdminRulesSchema,
     handler: (c, a) => searchFireAdminRules(c.law, SearchFireAdminRulesSchema.parse(a)),
+  },
+  {
+    name: "get_fire_admin_rule_text",
+    description: "화재안전성능기준(NFPC)·화재안전기술기준(NFTC) 행정규칙 원문 및 절 번호 조회",
+    schema: GetFireAdminRuleTextSchema,
+    handler: (c, a) => getFireAdminRuleText(c.law, GetFireAdminRuleTextSchema.parse(a)),
   },
   {
     name: "search_hazmat",

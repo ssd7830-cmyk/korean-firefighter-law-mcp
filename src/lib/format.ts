@@ -45,9 +45,8 @@ const LABELS: Record<string, string> = {
 /** data.go.kr 응답 body → 읽을 수 있는 텍스트. 필드명이 서비스마다 달라 범용 key: value로 출력 */
 export function formatBody(body: DataGoKrBody, title: string, maxItems = 50): string {
   const items = toArray<Record<string, unknown>>(body.items?.item as any)
-  const total = body.totalCount ?? items.length
   if (items.length === 0) {
-    return `${title}\n결과 없음 (totalCount: ${total}). 파라미터(날짜 형식·지역명)를 확인하세요.`
+    return `${title}\n결과 없음. 파라미터(날짜 형식·지역명)를 확인하세요.`
   }
   const shown = Math.min(items.length, maxItems)
   const lines = items.slice(0, shown).map((item, i) => {
@@ -57,11 +56,10 @@ export function formatBody(body: DataGoKrBody, title: string, maxItems = 50): st
       .join(" | ")
     return `${i + 1}. ${fields}`
   })
-  const parsedTotal = Number(total)
-  const knownCount = Number.isFinite(parsedTotal) && parsedTotal >= items.length ? parsedTotal : items.length
-  const omitted = Math.max(0, knownCount - shown)
+  // 일부 소방청 API의 totalCount는 전체가 아니라 현재 페이지 수다. 실제 받은 항목만 확정값으로 표시한다.
+  const omitted = Math.max(0, items.length - shown)
   const truncated = omitted > 0 ? `\n… 외 ${omitted}건 생략` : ""
-  return `${title} (전체 ${total}건)\n${lines.join("\n")}${truncated}`
+  return truncate(`${title} (조회 ${items.length}건)\n${lines.join("\n")}${truncated}`, 12_000)
 }
 
 /** 결과 내 키워드 필터. totalCount는 필터 후 개수로 갱신한다 (원본 전체건수를 보여주면 오독) */

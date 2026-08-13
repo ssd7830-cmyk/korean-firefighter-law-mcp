@@ -6,5 +6,5 @@ build/
 # Claude Code 개인 설정 (공유하지 않음)
 .claude/settings.local.json
 
-# GitHub Actions — 토큰에 workflow 권한이 없어 로컬 보관 (권한 확보 후 커밋)
+# GitHub Actions — 현재 토큰에 workflow 권한이 없어 로컬 보관 (권한 확보 후 커밋)
 .github/workflows/

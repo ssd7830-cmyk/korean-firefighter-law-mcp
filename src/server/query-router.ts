@@ -80,7 +80,7 @@ function extractMonth(q: string): string | undefined {
 }
 
 function extractJo(q: string): string | undefined {
-  const m = q.replace(/\s+/g, "").match(/제(\d+)조(?:의(\d+))?/)
+  const m = q.replace(/\s+/g, "").match(/(?:제)?(\d+)조(?:의(\d+))?/)
   if (!m) return undefined
   return m[2] ? `${m[1]}의${m[2]}` : m[1]
 }
@@ -88,7 +88,12 @@ function extractJo(q: string): string | undefined {
 function extractLawName(q: string): string | undefined {
   const compact = q.replace(/\s+/g, "")
   for (const name of [...FIRE_LAW_ALIASES, ...FIRE_LAWS].sort((a, b) => b.length - a.length)) {
-    if (compact.includes(name.replace(/\s+/g, ""))) return name
+    const key = name.replace(/\s+/g, "")
+    const at = compact.indexOf(key)
+    if (at >= 0) {
+      const suffix = compact.slice(at + key.length).match(/^(시행령|시행규칙)/)?.[1]
+      return suffix ? `${name} ${suffix}` : name
+    }
   }
   return undefined
 }
@@ -120,6 +125,7 @@ function extractBuildingName(q: string, sido: string): string | undefined {
       /특정소방대상물|소방대상물|소방시설|스프링클러|간이스프링클러|소화설비|경보설비|설치(?:된|여부)?|현황|건물|검색|조회|보여\s*줘|알려\s*줘/g,
       " "
     )
+    .replace(/있나|있어|있는지|찾아\s*줘|해\s*줘|주세요/g, " ")
     .replace(/\s+/g, " ")
     .trim()
   return name || undefined
@@ -140,9 +146,9 @@ export function routeQuestion(q: string): RoutedQuery {
     return { tool: "search_fire_admin_rules", args: { query: extractAdminRuleQuery(q) } }
   }
   // 법령명(위험물안전관리법 등)이 잡혔으면 법령 질문이므로 위험물 물질 검색으로 보내지 않는다
-  if (!law && /위험물|CAS\s*번호|UN\s*번호/i.test(q)) {
+  if (!law && /위험물|CAS(?:\s*번호)?|UN(?:\s*번호)?/i.test(q)) {
     const query = cleanQuery(q)
-      .replace(/위험물|물질|여부|인지|이야|맞아|CAS\s*번호|UN\s*번호/gi, "")
+      .replace(/위험물|물질|여부|인지|이야|맞아|CAS(?:\s*번호)?|UN(?:\s*번호)?/gi, "")
       .replace(/\s+/g, " ")
       .trim()
     if (query) return { tool: "search_hazmat", args: { query } }
@@ -180,4 +186,14 @@ export function routeQuestion(q: string): RoutedQuery {
   }
   // 기본: 법령 검색으로 (소방 도메인 질문의 최다 케이스)
   return { tool: "search_fire_law", args: { query: cleanQuery(q) || q } }
+}
+
+/** 날짜처럼 쓴 값이 달력상 무효면 엉뚱한 법령 검색으로 폴백하지 않는다. */
+export function questionValidationError(q: string): string | undefined {
+  const compact = q.match(/\b\d{8}\b/)?.[0]
+  if (compact && !isValidCompactDate(compact)) return `유효하지 않은 날짜입니다: ${compact}`
+  const m = q.match(/(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})일?/)
+  if (!m) return undefined
+  const value = `${m[1]}${m[2].padStart(2, "0")}${m[3].padStart(2, "0")}`
+  return isValidCompactDate(value) ? undefined : `유효하지 않은 날짜입니다: ${m[0]}`
 }

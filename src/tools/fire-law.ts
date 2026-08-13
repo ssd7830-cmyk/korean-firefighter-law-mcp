@@ -3,7 +3,7 @@ import type { LawApiClient } from "../lib/law-api-client.js"
 import { FIRE_LAWS, joLabel, resolveFireLawAlias, toJoCode } from "../lib/search-normalizer.js"
 import { toArray } from "../lib/xml.js"
 import { truncate } from "../lib/format.js"
-import { textResult, type ToolResult } from "../lib/errors.js"
+import { emptyResult, textResult, type ToolResult } from "../lib/errors.js"
 
 export const SearchFireLawSchema = z.object({
   query: z
@@ -34,7 +34,7 @@ export async function searchFireLaw(client: LawApiClient, args: SearchFireLawInp
     byText = true
   }
   if (laws.length === 0) {
-    return textResult(`"${query}" 검색 결과 없음. 정식 법령명이나 약칭(화재예방법, 소방시설법 등)으로 다시 시도하세요.`)
+    return emptyResult(`"${query}" 검색 결과 없음. 정식 법령명이나 약칭(화재예방법, 소방시설법 등)으로 다시 시도하세요.`)
   }
   const lines = laws.map(
     (l, i) =>
@@ -76,10 +76,10 @@ export async function getFireLawText(client: LawApiClient, args: GetFireLawTextI
   let mst = args.mst
   let lawTitle = args.lawName ?? ""
   if (!mst) {
-    if (!args.lawName) return textResult("lawName 또는 mst 중 하나는 필요합니다.")
+    if (!args.lawName) return emptyResult("lawName 또는 mst 중 하나는 필요합니다.")
     const query = resolveFireLawAlias(args.lawName)
     const found = toArray<any>((await client.search("law", query, { display: "30" }))?.LawSearch?.law)
-    if (found.length === 0) return textResult(`"${query}" 법령을 찾지 못했습니다.`)
+    if (found.length === 0) return emptyResult(`"${query}" 법령을 찾지 못했습니다.`)
     const compact = query.replace(/\s+/g, "")
     const exact = found.find((l) => String(l.법령명한글).replace(/\s+/g, "") === compact)
     const pick = exact ?? found[0]
@@ -91,13 +91,55 @@ export async function getFireLawText(client: LawApiClient, args: GetFireLawTextI
   if (args.jo) params.JO = toJoCode(args.jo)
   const parsed = await client.service("law", params)
   const law = parsed?.법령
-  if (!law) return textResult(`MST ${mst} 조회 결과가 비었습니다. MST 값을 확인하세요.`)
+  if (!law) return emptyResult(`MST ${mst} 조회 결과가 비었습니다. MST 값을 확인하세요.`)
 
   const units = toArray<any>(law?.조문?.조문단위)
   const out: string[] = []
   for (const unit of units) collectText(unit, out)
-  if (out.length === 0) return textResult(`${lawTitle} — 조문 내용을 찾지 못했습니다. jo 파라미터를 빼고 다시 시도하세요.`)
+  if (out.length === 0) return emptyResult(`${lawTitle} — 조문 내용을 찾지 못했습니다. jo 파라미터를 빼고 다시 시도하세요.`)
 
   const header = `${law?.기본정보?.법령명_한글 ?? lawTitle}${args.jo ? ` ${joLabel(args.jo)}` : ""}`
   return textResult(truncate(`${header}\n\n${out.join("\n")}`))
+}
+
+export const GetFireLawAnnexSchema = z.object({
+  lawName: z.string().max(200).optional().describe("법령명 (약칭 지원, mst 없을 때 검색)"),
+  mst: z.string().max(30).optional().describe("법령일련번호 MST"),
+  annex: z.string().max(30).optional().describe('별표 번호 (예: "4", "별표 4")'),
+  query: z.string().max(100).optional().describe('별표 안에서 찾을 키워드 (예: "공동주택")'),
+})
+
+export type GetFireLawAnnexInput = z.infer<typeof GetFireLawAnnexSchema>
+
+export async function getFireLawAnnex(client: LawApiClient, args: GetFireLawAnnexInput): Promise<ToolResult> {
+  let mst = args.mst
+  let title = args.lawName ?? ""
+  if (!mst) {
+    if (!args.lawName) return emptyResult("lawName 또는 mst 중 하나는 필요합니다.")
+    const query = resolveFireLawAlias(args.lawName)
+    const found = toArray<any>((await client.search("law", query, { display: "30" }))?.LawSearch?.law)
+    if (found.length === 0) return emptyResult(`"${query}" 법령을 찾지 못했습니다.`)
+    const compact = query.replace(/\s+/g, "")
+    const pick = found.find((l) => String(l.법령명한글).replace(/\s+/g, "") === compact) ?? found[0]
+    mst = String(pick.법령일련번호)
+    title = String(pick.법령명한글)
+  }
+  const law = (await client.service("law", { MST: mst }))?.법령
+  const annexes = toArray<any>(law?.별표?.별표단위)
+  const wanted = args.annex?.match(/\d+/)?.[0]
+  const selected = wanted
+    ? annexes.filter((a) => Number(a.별표번호) === Number(wanted))
+    : annexes
+  if (selected.length === 0) return emptyResult(`${title} — 별표 ${wanted ?? ""}를 찾지 못했습니다.`)
+  const lines: string[] = []
+  for (const annex of selected) collectText(annex, lines)
+  const filtered = args.query ? lines.filter((line) => line.includes(args.query!)).map((line) => {
+    const at = line.indexOf(args.query!)
+    if (line.length <= 1800) return line
+    const start = Math.max(0, at - 800)
+    const end = Math.min(line.length, at + args.query!.length + 800)
+    return `${start ? "…" : ""}${line.slice(start, end)}${end < line.length ? "…" : ""}`
+  }) : lines
+  if (filtered.length === 0) return emptyResult(`${title} 별표 ${wanted ?? ""} — "${args.query}"를 찾지 못했습니다.`)
+  return textResult(truncate(`${law?.기본정보?.법령명_한글 ?? title} 별표 ${wanted ?? "전체"}${args.query ? ` — ${args.query}` : ""}\n\n${filtered.join("\n")}`))
 }

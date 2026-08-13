@@ -2,9 +2,9 @@ import { describe, it, expect, vi } from "vitest"
 import { searchFireStats, SearchFireStatsSchema } from "./fire-stats.js"
 import { getEmsStats, GetEmsStatsSchema } from "./ems-stats.js"
 import { getBuildingFacilities, searchFireBuilding } from "./fire-building.js"
-import { searchFireLaw, getFireLawText } from "./fire-law.js"
+import { searchFireLaw, getFireLawText, getFireLawAnnex } from "./fire-law.js"
 import { searchFirePrecedents } from "./fire-precedents.js"
-import { searchFireAdminRules, SearchFireAdminRulesSchema } from "./fire-admin-rules.js"
+import { searchFireAdminRules, SearchFireAdminRulesSchema, getFireAdminRuleText } from "./fire-admin-rules.js"
 import { searchHazmat } from "./hazmat.js"
 import { koreanDate } from "../lib/korean-date.js"
 
@@ -22,6 +22,10 @@ describe("도구 핸들러 — 의도: API 파라미터 매핑이 스펙과 일�
     expect(service).toBe("FireInformationService")
     expect(op).toBe("getOcByfrstFireSmrzPcnd")
     expect(params.ocrn_ymd).toBe("20250101")
+  })
+
+  it("자연어 화재 조회 기본값은 일자 결과를 최대 1000건까지 한 번에 받는다", () => {
+    expect(SearchFireStatsSchema.parse({ date: "20250101" }).numOfRows).toBe(1000)
   })
 
   it("get_ems_stats는 스펙 파라미터명(sidoHqOgidNm 등)으로 매핑한다", async () => {
@@ -47,7 +51,7 @@ describe("도구 핸들러 — 의도: API 파라미터 매핑이 스펙과 일�
   it("get_building_facilities는 buildingName으로 결과를 좁히고 건수도 갱신한다", async () => {
     const client = fakeFireClient([{ 대상물명: "롯데타워" }, { 대상물명: "시청사" }])
     const result = await getBuildingFacilities(client, { sido: "서울특별시", buildingName: "롯데", pageNo: 1, numOfRows: 50 })
-    expect(result.content[0].text).toContain("전체 1건")
+    expect(result.content[0].text).toContain("조회 1건")
     expect(result.content[0].text).not.toContain("시청사")
   })
 
@@ -55,7 +59,7 @@ describe("도구 핸들러 — 의도: API 파라미터 매핑이 스펙과 일�
     const client = {
       call: vi.fn(async (_service, _op, params) =>
         params.pageNo === 1
-          ? { items: { item: [{ objNm: "시청사" }] }, totalCount: 1001 }
+          ? { items: { item: Array.from({ length: 1000 }, (_, i) => ({ objNm: `시청사${i}` })) }, totalCount: 1000 }
           : { items: { item: [{ objNm: "롯데호텔" }] }, totalCount: 1001 }
       ),
     } as any
@@ -67,14 +71,14 @@ describe("도구 핸들러 — 의도: API 파라미터 매핑이 스펙과 일�
     })
     expect(client.call).toHaveBeenCalledTimes(2)
     expect(result.content[0].text).toContain("롯데호텔")
-    expect(result.content[0].text).toContain("전체 1건")
+    expect(result.content[0].text).toContain("조회 1건")
   })
 
   it("특정소방대상물도 건물명으로 전체 페이지를 검색한다", async () => {
     const client = {
       call: vi.fn(async (_service, _op, params) =>
         params.pageNo === 1
-          ? { items: { item: [{ objNm: "시청사" }] }, totalCount: 1001 }
+          ? { items: { item: Array.from({ length: 1000 }, (_, i) => ({ objNm: `시청사${i}` })) }, totalCount: 1000 }
           : { items: { item: [{ objNm: "롯데타워" }] }, totalCount: 1001 }
       ),
     } as any
@@ -149,6 +153,43 @@ describe("법령 도구 — 의도: 정확한 법령 선택", () => {
     const client = { search: vi.fn(async () => ({ PrecSearch: {} })) } as any
     const result = await searchFirePrecedents(client, { query: "존재하지않는키워드", display: 20 })
     expect(result.content[0].text).toContain("키워드를 바꿔서")
+  })
+
+  it("시행령 별표 번호와 키워드로 공식 별표 원문을 좁힌다", async () => {
+    const client = {
+      search: vi.fn(async () => ({ LawSearch: { law: { 법령명한글: "소방시설법 시행령", 법령일련번호: "7" } } })),
+      service: vi.fn(async () => ({ 법령: { 기본정보: { 법령명_한글: "소방시설법 시행령" }, 별표: { 별표단위: [
+        { 별표번호: "0003", 별표내용: "다른 별표" },
+        { 별표번호: "0004", 별표제목: "특정소방대상물", 별표내용: ["공동주택 스프링클러", "창고 소화설비"] },
+      ] } } })),
+    } as any
+    const result = await getFireLawAnnex(client, { lawName: "소방시설법 시행령", annex: "4", query: "공동주택" })
+    expect(result.content[0].text).toContain("공동주택 스프링클러")
+    expect(result.content[0].text).not.toContain("창고 소화설비")
+  })
+
+  it("NFPC/NFTC 검색 결과 ID로 행정규칙 본문을 조회한다", async () => {
+    const client = {
+      search: vi.fn(async () => ({ AdmRulSearch: { admrul: { 행정규칙명: "NFPC 103", 행정규칙일련번호: "210" } } })),
+      service: vi.fn(async () => ({ AdmRulService: {
+        행정규칙기본정보: { 행정규칙명: "NFPC 103" }, 조문내용: { 조문단위: { 조문내용: "2.5.3 공동주택 성능기준" } },
+      } })),
+    } as any
+    const result = await getFireAdminRuleText(client, { ruleName: "NFPC 103", section: "2.5.3" })
+    expect(client.service).toHaveBeenCalledWith("admrul", { ID: "210" })
+    expect(result.content[0].text).toContain("2.5.3 공동주택 성능기준")
+  })
+
+  it("NFPC 103을 요청했을 때 먼저 나온 NFPC 103A를 고르지 않는다", async () => {
+    const client = {
+      search: vi.fn(async () => ({ AdmRulSearch: { admrul: [
+        { 행정규칙명: "간이스프링클러설비의 화재안전성능기준(NFPC 103A)", 행정규칙일련번호: "1031" },
+        { 행정규칙명: "스프링클러설비의 화재안전성능기준(NFPC 103)", 행정규칙일련번호: "1030" },
+      ] } })),
+      service: vi.fn(async () => ({ AdmRulService: { 조문내용: "NFPC 103 본문" } })),
+    } as any
+    await getFireAdminRuleText(client, { ruleName: "NFPC 103" })
+    expect(client.service).toHaveBeenCalledWith("admrul", { ID: "1030" })
   })
 })
 

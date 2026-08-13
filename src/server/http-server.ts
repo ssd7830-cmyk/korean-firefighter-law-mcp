@@ -8,7 +8,6 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server as HttpServer } from "node:http"
-import { StringDecoder } from "node:string_decoder"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { requestContext } from "../lib/request-context.js"
 import { createMcpServer } from "./factory.js"
@@ -19,53 +18,8 @@ import { maskSensitiveUrl } from "../lib/fetch-with-retry.js"
 import { clientIp, FixedWindowRateLimiter } from "./rate-limit.js"
 import { authorized, setSecurityHeaders } from "./http-security.js"
 import type { Clients } from "../tool-registry.js"
-
-class PayloadTooLargeError extends Error {}
-
-function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ""
-    let size = 0
-    const decoder = new StringDecoder("utf8")
-    const cleanup = () => {
-      req.off("data", onData)
-      req.off("end", onEnd)
-      req.off("error", onError)
-    }
-    const onData = (chunk: Buffer) => {
-      size += chunk.length
-      if (size > maxBytes) {
-        cleanup()
-        req.resume()
-        reject(new PayloadTooLargeError("body too large"))
-        return
-      }
-      data += decoder.write(chunk)
-    }
-    const onEnd = () => {
-      cleanup()
-      resolve(data + decoder.end())
-    }
-    const onError = (err: Error) => {
-      cleanup()
-      reject(err)
-    }
-    const contentLength = Number(req.headers["content-length"])
-    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-      req.resume()
-      reject(new PayloadTooLargeError("body too large"))
-      return
-    }
-    req.on("data", onData)
-    req.on("end", onEnd)
-    req.on("error", onError)
-  })
-}
-
-function headerValue(req: IncomingMessage, name: string): string | undefined {
-  const v = req.headers[name]
-  return Array.isArray(v) ? v[0] : v
-}
+import { httpHost, requireAuthForPublicHost } from "./config.js"
+import { headerValue, parseHistory, PayloadTooLargeError, readBody } from "./http-body.js"
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value)
@@ -76,6 +30,8 @@ export function startHttpServer(clients: Clients, port: number): HttpServer {
   const adapter = createLlmAdapter()
   const mcpAuthToken = process.env.SERVER_AUTH_TOKEN
   const chatAuthToken = process.env.CHAT_AUTH_TOKEN || mcpAuthToken
+  const host = httpHost(process.env.HOST)
+  requireAuthForPublicHost(host, mcpAuthToken, chatAuthToken)
   const chatLimit = positiveInt(process.env.CHAT_RATE_LIMIT_PER_MINUTE, 60)
   const trustProxy = process.env.TRUST_PROXY === "true"
   const chatRateLimiter = new FixedWindowRateLimiter(chatLimit)
@@ -85,6 +41,12 @@ export function startHttpServer(clients: Clients, port: number): HttpServer {
       setSecurityHeaders(res)
       if (req.url === "/health") {
         res.writeHead(200, { "Content-Type": "text/plain" }).end("ok")
+        return
+      }
+      if (req.url === "/status") {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify({
+          status: "ok", mode: adapter ? "llm" : "lookup", provider: adapter?.name ?? null, model: adapter?.model ?? null,
+        }))
         return
       }
       // 챗봇 화면 (소방관용) — 브라우저에서 바로 채팅
@@ -107,8 +69,11 @@ export function startHttpServer(clients: Clients, port: number): HttpServer {
           return
         }
         let message: unknown
+        let history = parseHistory(undefined)
         try {
-          message = (JSON.parse(await readBody(req, 16 * 1024)) as { message?: unknown }).message
+          const body = JSON.parse(await readBody(req, 64 * 1024)) as { message?: unknown; history?: unknown }
+          message = body.message
+          history = parseHistory(body.history)
         } catch (err) {
           if (err instanceof PayloadTooLargeError) {
             res.writeHead(413, { "Content-Type": "text/plain" }).end("payload too large")
@@ -125,7 +90,7 @@ export function startHttpServer(clients: Clients, port: number): HttpServer {
           dataGoKrKey: headerValue(req, "x-data-go-kr-key"),
           lawOc: headerValue(req, "x-law-oc"),
         }
-        const result = await requestContext.run(keys, () => handleChat(message, clients, adapter))
+        const result = await requestContext.run(keys, () => handleChat(message, clients, adapter, history))
         res
           .writeHead(200, { "Content-Type": "application/json; charset=utf-8" })
           .end(JSON.stringify(result))
@@ -182,12 +147,12 @@ export function startHttpServer(clients: Clients, port: number): HttpServer {
     }
   })
 
-  httpServer.listen(port, () => {
+  httpServer.listen(port, host, () => {
     const address = httpServer.address()
     const actualPort = typeof address === "object" && address ? address.port : port
     const llmNote = adapter ? `AI 답변 모드 (${adapter.name})` : "조회 모드 (LLM 키 없음 — DEPLOY.md 'LLM 연결' 참조)"
     console.error(
-      `korean-firefighter-law-mcp HTTP 모드 시작 (포트 ${actualPort})\n` +
+      `korean-firefighter-law-mcp HTTP 모드 시작 (${host}:${actualPort})\n` +
         `  챗봇:     GET  /        — ${llmNote}\n` +
         `  챗봇 API: POST /api/chat\n` +
         `  MCP:      POST /mcp`
