@@ -1,0 +1,183 @@
+# korean-firefighter-law-mcp — 아키텍처 설계
+
+> v0.1 설계 초안 | 2026-08 | 참조 모델: [korean-law-mcp](https://github.com/chrisryugj/korean-law-mcp)
+
+소방 데이터 3덩어리(화재·구급 통계 + 소방시설 정보 + 소방 법령)를 AI가 바로 쓸 수 있는
+MCP 도구로 묶는다. korean-law-mcp가 법령 도메인에서 한 것을 소방 도메인에서 한다.
+
+---
+
+## 핵심 결정사항
+
+| 결정 | 선택 | 이유 |
+|---|---|---|
+| 언어/런타임 | TypeScript + Node.js | korean-law-mcp와 동일. MCP SDK 성숙도 최고 |
+| 데이터 방식 | **API 실시간 호출** (DB 미배포) | 법령·통계는 원본이 계속 갱신됨. 재배포 책임 없음 |
+| 캐시 | **인메모리 LRU + TTL만** (SQLite 없음) | MVP에 디스크 캐시는 과설계. 단 `CacheStore` 인터페이스로 분리해두고, data.go.kr 일일 호출 한도가 실제 문제 되면 그때 SQLite 구현체로 교체 |
+| 인터페이스 | MCP stdio 우선, HTTP는 2단계 | 로컬 Claude 연동이 1차 목표 |
+| 스키마 검증 | Zod → MCP JSON Schema 변환 | korean-law-mcp 방식 그대로 |
+
+---
+
+## High-Level 구조
+
+```
+┌──────────────────────────────────────────────────────┐
+│                MCP Client (Claude 등)                 │
+└───────────────┬──────────────────┬───────────────────┘
+          STDIO Mode          HTTP Mode (2단계)
+                │                  │
+┌───────────────▼──────────────────▼───────────────────┐
+│         korean-firefighter-law-mcp Server            │
+│                                                      │
+│  ┌────────────────────────────────────────────────┐  │
+│  │   Tool Registry (tool-registry.ts → allTools[])│  │
+│  │   통계(2) │ 시설(2) │ 법령(3) │ 체인(1, 2단계) │  │
+│  └────────────────────────────────────────────────┘  │
+│                        ▲                             │
+│  ┌────────────────────────────────────────────────┐  │
+│  │            Shared Libraries (src/lib/)          │  │
+│  │  • fire-api-client.ts  (data.go.kr 소방청 API) │  │
+│  │  • law-api-client.ts   (법제처 API, 소방 프리셋)│  │
+│  │  • fetch-with-retry.ts (타임아웃+재시도+백오프) │  │
+│  │  • cache.ts            (CacheStore 인터페이스   │  │
+│  │                         + InMemoryLru 구현)     │  │
+│  │  • xml-parser.ts       (양쪽 API XML 응답 파싱) │  │
+│  │  • errors.ts / schemas.ts                      │  │
+│  └────────────────────────────────────────────────┘  │
+└──────────┬───────────────────────────┬───────────────┘
+           │ HTTPS                     │ HTTPS
+           ▼                           ▼
+┌─────────────────────┐   ┌─────────────────────────────┐
+│  공공데이터포털      │   │  법제처 국가법령정보 API      │
+│  (apis.data.go.kr)  │   │  (law.go.kr/DRF)            │
+├─────────────────────┤   ├─────────────────────────────┤
+│ 화재정보서비스        │   │ lawSearch.do (소방 법령 검색)│
+│ 구급통계서비스        │   │ lawService.do (조문 조회)    │
+│ 특정소방대상물정보    │   │ 판례·행정규칙 (소방 필터)     │
+│ 소방시설정보          │   └─────────────────────────────┘
+└─────────────────────┘
+```
+
+---
+
+## 인증 (환경변수 2개)
+
+```bash
+# 공공데이터포털 인증키 — data.go.kr 회원가입 → 각 API 활용신청
+DATA_GO_KR_KEY=...
+
+# 법제처 Open API 인증키 — open.law.go.kr 발급
+LAW_OC=...
+```
+
+로그인·세션 없음. 두 키 모두 URL 파라미터로 전달 (data.go.kr은 `serviceKey=`, 법제처는 `OC=`).
+로그·에러 메시지에서 키 마스킹 필수 (korean-law-mcp의 `maskSensitiveUrl` 패턴).
+
+---
+
+## MVP 도구 세트 (v0.1 — 7개)
+
+### 통계 (data.go.kr)
+| 도구 | 하는 일 |
+|---|---|
+| `search_fire_stats` | 날짜·지역별 화재 발생 건수, 인명·재산 피해 조회 |
+| `get_ems_stats` | 시도본부·소방서·안전센터별 구급 출동 통계 |
+
+### 소방시설 (data.go.kr)
+| 도구 | 하는 일 |
+|---|---|
+| `search_fire_building` | 특정소방대상물(건물) 검색 — 이름·주소·용도별 |
+| `get_building_facilities` | 건물별 소방시설 현황·완공일·좌표 조회 |
+
+### 법령 (법제처, 소방 도메인 프리셋)
+| 도구 | 하는 일 |
+|---|---|
+| `search_fire_law` | 소방 법령 검색. 소방 6법 별칭 내장(아래) |
+| `get_fire_law_text` | 조문 단위 전문 조회 (`제10조` 등 지정) |
+| `search_fire_precedents` | 소방 관련 판례·행정심판 검색 |
+
+소방 법령 별칭 프리셋 (`search-normalizer`에 내장):
+소방기본법 / 화재의 예방 및 안전관리에 관한 법률(화재예방법) /
+소방시설 설치 및 관리에 관한 법률(소방시설법) / 소방시설공사업법 /
+위험물안전관리법 / 119구조·구급에 관한 법률 / 소방공무원법 + 각 시행령·시행규칙
+
+### 2단계 체인 도구
+| 도구 | 하는 일 |
+|---|---|
+| `check_building_compliance` | `get_building_facilities` + `get_fire_law_text` 결합: 건물 시설 현황 ↔ 법령 의무사항 대조 리포트 |
+
+---
+
+## 디렉터리 구조
+
+```
+korean-firefighter-law-mcp/
+├── src/
+│   ├── index.ts              # 엔트리: MCP 서버 초기화, stdio 연결
+│   ├── cli.ts                # (2단계) CLI 직접 실행 인터페이스
+│   ├── tool-registry.ts      # allTools[] 중앙 등록 + Zod→JSON Schema 변환
+│   ├── lib/
+│   │   ├── fire-api-client.ts
+│   │   ├── law-api-client.ts
+│   │   ├── fetch-with-retry.ts
+│   │   ├── cache.ts          # interface CacheStore + InMemoryLruCache
+│   │   ├── xml-parser.ts
+│   │   ├── search-normalizer.ts  # 소방 법령 별칭 해석
+│   │   ├── errors.ts
+│   │   └── schemas.ts
+│   ├── tools/
+│   │   ├── fire-stats.ts
+│   │   ├── ems-stats.ts
+│   │   ├── fire-building.ts
+│   │   ├── fire-law.ts
+│   │   └── fire-precedents.ts
+│   └── server/
+│       └── http-server.ts    # (2단계) Streamable HTTP stateless
+├── test/
+├── .env.example
+├── package.json / tsconfig.json
+└── README.md
+```
+
+원칙 (korean-law-mcp 계승):
+1. Tools → Shared Libs → API Client 단방향 의존
+2. 파일당 200줄 미만, 단일 책임
+3. 도구는 `{ name, description, schema, handler }`로 `allTools[]`에만 등록
+4. TypeScript strict + Zod 검증
+
+---
+
+## 네트워크 방어층 (korean-law-mcp에서 배운 것)
+
+| 문제 | 대응 |
+|---|---|
+| 법제처 DRF 간헐 404 (버스트 스로틀) | 404/429/503/504 재시도 + exponential backoff |
+| 법제처 `Referer` 없는 요청 거부 | law.go.kr 호출 시 기본 Referer 자동 주입 |
+| 200 상태에 빈 본문/HTML 점검 페이지 | 빈/HTML 응답 감지 → 재시도 → 명확한 에러 메시지 |
+| data.go.kr 일일 호출 한도 (1천~1만/일) | 캐시 TTL 차등: 검색 1h / 조문 24h / **확정 연도 통계 7d** |
+| API 키 로그 유출 | 에러·로그 URL에서 `serviceKey=***`, `OC=***` 마스킹 |
+
+---
+
+## 캐시 전략
+
+```typescript
+interface CacheStore {
+  get<T>(key: string): T | undefined
+  set<T>(key: string, data: T, ttlMs: number): void
+}
+```
+
+- v0.1: `InMemoryLruCache` (최대 100건, korean-law-mcp cache.ts 이식)
+- TTL: 법령 검색 1시간 / 조문 24시간 / 시설정보 24시간 / 과거 연도 확정 통계 7일
+- SQLite는 **일일 호출 한도가 실측으로 문제 될 때만** `SqliteCacheStore`로 추가.
+  도구·클라이언트 코드는 인터페이스만 보므로 교체 비용 0
+
+---
+
+## 로드맵
+
+- **v0.1 (MVP)**: stdio MCP + 도구 7개 + 인메모리 캐시 + 재시도 방어층
+- **v0.2**: `check_building_compliance` 체인 도구, CLI 인터페이스, 별표/서식(소방청 고시) 조회
+- **v0.3**: Streamable HTTP stateless 서버 (원격 배포), 필요 시 SQLite 캐시
