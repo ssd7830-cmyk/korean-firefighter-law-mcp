@@ -142,6 +142,40 @@ describe("법령 도구 — 의도: 정확한 법령 선택", () => {
     expect(result.content[0].text).toContain("제10조(내용)")
   })
 
+  it("조문 조회에 query를 주면 키워드가 포함된 조문만 추출한다", async () => {
+    const client = {
+      search: vi.fn(),
+      service: vi.fn(async () => ({
+        법령: {
+          기본정보: { 법령명_한글: "건축물의 피난ㆍ방화구조 등의 기준에 관한 규칙" },
+          조문: {
+            조문단위: [
+              { 조문내용: "제25조(수수료) 인정 신청 비용은 별표로 정한다." },
+              { 조문내용: "제26조(방화문의 구분) 방화문은 60분+ 방화문, 60분 방화문, 30분 방화문으로 구분한다." },
+            ],
+          },
+        },
+      })),
+    } as any
+    const result = await getFireLawText(client, { mst: "279461", query: "방화문" })
+    const text = result.content[0].text
+    expect(text).toContain("제26조")
+    expect(text).toContain('"방화문" 포함 조문')
+    expect(text).not.toContain("수수료") // 무관 조문은 제외
+  })
+
+  it("query가 어느 조문에도 없으면 안내 오류를 준다", async () => {
+    const client = {
+      search: vi.fn(),
+      service: vi.fn(async () => ({
+        법령: { 기본정보: { 법령명_한글: "소방기본법" }, 조문: { 조문단위: [{ 조문내용: "제1조(목적)" }] } },
+      })),
+    } as any
+    const result = await getFireLawText(client, { mst: "1", query: "방화문" })
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toContain("포함된 조문이 없습니다")
+  })
+
   it("검색어 없으면 API 호출 없이 소방 법령 목록을 준다", async () => {
     const client = { search: vi.fn() } as any
     const result = await searchFireLaw(client, { query: undefined, display: 20 })
@@ -238,6 +272,31 @@ describe("의도: 내용 질문도 답이 나온다 (본문검색 폴백)", () =
     expect(client.search.mock.calls[1][2].search).toBe("2") // 2차 호출이 본문검색
     expect(result.content[0].text).toContain("조문 내용 검색")
     expect(result.content[0].text).toContain("피난ㆍ방화구조")
+  })
+
+  it("법령 본문검색 폴백도 무관 부처보다 소방·건축 소관을 앞세운다", async () => {
+    const client = {
+      search: vi
+        .fn()
+        .mockResolvedValueOnce({ LawSearch: {} })
+        .mockResolvedValueOnce({
+          LawSearch: {
+            totalCnt: "27",
+            law: [
+              { 법령명한글: "공증 서류의 보존에 관한 규칙", 법령일련번호: "1", 소관부처명: "법무부" },
+              { 법령명한글: "건축물의 피난ㆍ방화구조 등의 기준에 관한 규칙", 법령일련번호: "2", 소관부처명: "국토교통부" },
+              { 법령명한글: "소방시설 설치 및 관리에 관한 법률 시행령", 법령일련번호: "3", 소관부처명: "소방청" },
+            ],
+          },
+        }),
+    } as any
+    const result = await searchFireLaw(client, { query: "방화문키워드", display: 2 })
+    const text = result.content[0].text
+    expect(client.search.mock.calls[1][2].display).toBe("100")
+    expect(text).toContain("총 27건 중 관련도순 2건")
+    expect(text).toContain("피난ㆍ방화구조")
+    expect(text).toContain("소방시설 설치")
+    expect(text).not.toContain("공증") // 무관 부처는 표시 건수 밖
   })
 
   it("행정규칙 검색 — 이름 매칭이 나오면 목록으로 반환한다", async () => {

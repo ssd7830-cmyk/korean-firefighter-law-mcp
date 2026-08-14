@@ -58,6 +58,7 @@ export const GetFireLawTextSchema = z.object({
   lawName: z.string().max(200).optional().describe("법령명 (약칭 지원, mst 없을 때 검색해서 첫 매칭 사용)"),
   mst: z.string().max(30).optional().describe("법령일련번호 MST (search_fire_law 결과의 값, 있으면 우선)"),
   jo: z.string().max(30).optional().describe('조번호 (예: "제10조", "10", "10의2"). 비우면 전체 (길면 잘림)'),
+  query: z.string().max(100).optional().describe('조문 내용에서 찾을 키워드 (예: "방화문") — 조번호를 모를 때 관련 조문만 추출'),
 })
 
 export type GetFireLawTextInput = z.infer<typeof GetFireLawTextSchema>
@@ -103,10 +104,22 @@ export async function getFireLawText(client: LawApiClient, args: GetFireLawTextI
 
   const units = toArray<any>(law?.조문?.조문단위)
   const out: string[] = []
-  for (const unit of units) collectText(unit, out)
-  if (out.length === 0) return emptyResult(`${lawTitle} — 조문 내용을 찾지 못했습니다. jo 파라미터를 빼고 다시 시도하세요.`)
+  for (const unit of units) {
+    const lines: string[] = []
+    collectText(unit, lines)
+    // query가 있으면 키워드가 등장하는 조문 단위만 추출 (조번호를 모르는 내용 질문용)
+    if (args.query && !lines.some((line) => line.includes(args.query!))) continue
+    out.push(...lines)
+  }
+  if (out.length === 0) {
+    return emptyResult(
+      args.query
+        ? `${lawTitle} — "${args.query}"가 포함된 조문이 없습니다. 다른 키워드로 다시 시도하세요.`
+        : `${lawTitle} — 조문 내용을 찾지 못했습니다. jo 파라미터를 빼고 다시 시도하세요.`
+    )
+  }
 
-  const header = `${law?.기본정보?.법령명_한글 ?? lawTitle}${args.jo ? ` ${joLabel(args.jo)}` : ""}`
+  const header = `${law?.기본정보?.법령명_한글 ?? lawTitle}${args.jo ? ` ${joLabel(args.jo)}` : ""}${args.query ? ` — "${args.query}" 포함 조문` : ""}`
   return textResult(truncate(`${header}\n\n${out.join("\n")}`))
 }
 
