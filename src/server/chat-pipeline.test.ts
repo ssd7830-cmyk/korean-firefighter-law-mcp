@@ -79,8 +79,8 @@ describe("chat-pipeline — 무조건 조회 구조", () => {
     expect(receivedUser).toContain("[조회된 자료]")
     expect(receivedUser).toContain("소방기본법") // 조회 결과가 실제로 자료에 들어감
     expect(result.answer).toContain("[자료 1]") // 주장에 근거 번호 인용
-    expect(result.answer).toContain("[공식 조회 자료]") // 원문 병기
-    expect(result.answer).toContain("소방기본법")
+    expect(result.sources).toContain("[자료 1]") // 원문은 sources 필드로 병기
+    expect(result.sources).toContain("소방기본법")
   })
 
   it("답변 생성이 실패해도 조회 결과는 반환된다 (답변 증발 금지)", async () => {
@@ -93,7 +93,7 @@ describe("chat-pipeline — 무조건 조회 구조", () => {
     }
     const result = await handleChat("소방기본법 검색", createClients(), broken)
     expect(result.mode).toBe("lookup")
-    expect(result.answer).toContain("소방기본법")
+    expect(result.sources).toContain("소방기본법") // 원문은 sources로 반환
   })
 
   const singlePlan = '{"calls":[{"tool":"search_fire_law","args":{"query":"소방기본법"}}]}'
@@ -106,7 +106,7 @@ describe("chat-pipeline — 무조건 조회 구조", () => {
     const result = await handleChat("소방기본법 검색", createClients(), fake)
     expect(result.mode).toBe("lookup")
     expect(result.answer).not.toContain("아무렇게나 쓴 답변")
-    expect(result.answer).toContain("소방기본법")
+    expect(result.sources).toContain("소방기본법")
   })
 
   it("존재하지 않는 자료 번호를 인용하면 폐기하고 공식 원문으로 폴백한다", async () => {
@@ -117,7 +117,7 @@ describe("chat-pipeline — 무조건 조회 구조", () => {
     const result = await handleChat("소방기본법 검색", createClients(), fake)
     expect(result.mode).toBe("lookup")
     expect(result.answer).not.toContain("지어낸 주장")
-    expect(result.answer).toContain("소방기본법")
+    expect(result.sources).toContain("소방기본법")
   })
 
   it("일부 문장에만 인용한 답변도 유효 인용이 1개 이상이면 채택한다", async () => {

@@ -1,4 +1,6 @@
-/** 단일 HTML 챗봇 화면. 대화 목록은 현재 탭의 sessionStorage에만 저장한다. */
+/** 단일 HTML 챗봇 화면 (마크업·스타일). 동작 스크립트는 chat-script.ts에서 삽입한다. */
+import { CHAT_SCRIPT } from "./chat-script.js"
+
 export const CHAT_PAGE_HTML = `<!doctype html>
 <html lang="ko">
 <head><meta charset="utf-8">
@@ -21,7 +23,12 @@ export const CHAT_PAGE_HTML = `<!doctype html>
   .avatar { width:30px; height:30px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:15px; }
   .user .avatar { background:#444; } .bot .avatar { background:var(--accent); }
   .bubble { line-height:1.7; font-size:15px; white-space:pre-wrap; word-break:break-word; padding-top:3px; min-width:0; }
+  .bubble div:empty { height:.7em; }
   .meta { font-size:11px; color:var(--sub); margin-top:6px; }
+  .cite { display:inline-block; font-size:11px; line-height:1.5; color:#bfbfbf; background:#3d3d3d; border-radius:8px; padding:0 7px; margin:0 2px; vertical-align:1px; white-space:nowrap; }
+  details.src { margin-top:10px; }
+  details.src summary { cursor:pointer; font-size:12px; color:var(--sub); user-select:none; } details.src summary:hover { color:var(--text); }
+  .src-body { margin-top:8px; padding:10px 12px; background:#282828; border-radius:8px; white-space:pre-wrap; font-size:13px; color:#cfcfcf; max-height:380px; overflow-y:auto; }
   #empty { max-width:760px; margin:12vh auto 0; padding:0 20px; text-align:center; color:var(--sub); }
   #empty h1 { color:var(--text); font-size:26px; margin-bottom:10px; }
   #empty .ex { display:inline-block; margin:6px; padding:10px 14px; border:1px solid #444; border-radius:10px; background:transparent; color:var(--sub); font-size:13px; cursor:pointer; }
@@ -32,7 +39,9 @@ export const CHAT_PAGE_HTML = `<!doctype html>
   #send { background:var(--text); color:var(--bg); border:none; border-radius:50%; width:34px; height:34px; cursor:pointer; font-size:16px; flex-shrink:0; }
   #send:disabled { opacity:.3; cursor:default; }
   #notice { max-width:760px; margin:6px auto 0; text-align:center; font-size:11px; color:var(--sub); }
-  .md-heading { font-weight:700; font-size:17px; margin:10px 0 4px; } .md-list { padding-left:14px; } .bubble code { background:#333; border-radius:4px; padding:1px 4px; }
+  .md-heading { font-weight:700; font-size:17px; margin:10px 0 4px; } .bubble code { background:#333; border-radius:4px; padding:1px 4px; }
+  .md-list,.md-num { padding-left:16px; text-indent:-16px; margin:2px 0; }
+  .md-hr { border-top:1px solid #3a3a3a; margin:10px 0; height:0; }
   @media (max-width:720px) { #mobileBar { display:flex; }
     #side { display:none; position:fixed; inset:0 auto 0 0; z-index:10; box-shadow:8px 0 24px #0008; } body.side-open #side { display:flex; } }
 </style>
@@ -62,137 +71,6 @@ export const CHAT_PAGE_HTML = `<!doctype html>
     <div id="notice">답변은 조회된 공식 데이터를 근거로 생성됩니다. 중요한 판단은 원문을 확인하세요.</div>
   </div>
 </div>
-<script>
-const chat=document.getElementById("chat"),input=document.getElementById("input"),send=document.getElementById("send"),empty=document.getElementById("empty"),convList=document.getElementById("convList");
-let convs = [];
-try { convs = JSON.parse(sessionStorage.getItem("fire-convs") || "[]"); } catch { convs = []; }
-if (!Array.isArray(convs)) convs = [];
-convs = convs.filter(c => c && typeof c.title === "string" && Array.isArray(c.msgs)).slice(0, 30).map(c => ({
-  title:c.title.slice(0,100), msgs:c.msgs.filter(m => m && (m.role === "user" || m.role === "bot") && typeof m.text === "string")
-    .slice(-200).map(m => ({ role:m.role, text:m.text, meta:typeof m.meta === "string" ? m.meta : "" }))
-}));
-let chatToken = sessionStorage.getItem("fire-chat-token") || "";
-let current = null;
-
-function renderList() {
-  convList.innerHTML = "";
-  convs.forEach((c, i) => {
-    const d=document.createElement("div"); d.className="conv"+(current===i ? " active" : "");
-    const t=document.createElement("button"); t.className="conv-open"; t.textContent=c.title; t.setAttribute("aria-label","대화 열기: "+c.title);
-    const x = document.createElement("button"); x.className = "del"; x.textContent = "✕"; x.title = "대화 삭제";
-    x.onclick = (e) => {
-      e.stopPropagation(); convs.splice(i, 1);
-      if (current === i) current = null; else if (current > i) current--;
-      save(); renderList(); renderConv();
-    };
-    t.onclick = () => { current = i; renderConv(); renderList(); closeSide(); };
-    d.appendChild(t); d.appendChild(x);
-    convList.appendChild(d);
-  });
-}
-function renderConv() {
-  chat.innerHTML = "";
-  if (current === null || !convs[current]) { chat.appendChild(empty); return; }
-  convs[current].msgs.forEach(m => addRow(m.role, m.text, m.meta, false));
-  chat.scrollTop = chat.scrollHeight;
-}
-function addRow(role, text, meta, scroll = true) {
-  const row=document.createElement("div"); row.className="row "+(role === "user" ? "user" : "bot");
-  const av=document.createElement("div"); av.className="avatar";
-  av.textContent = role === "user" ? "나" : "🚒";
-  const b=document.createElement("div"); b.className="bubble";
-  if (role === "user") b.textContent = text; else renderSafeMarkdown(b, text);
-  if (meta) { const mm = document.createElement("div"); mm.className = "meta"; mm.textContent = meta; b.appendChild(mm); }
-  row.appendChild(av); row.appendChild(b); chat.appendChild(row);
-  if (scroll) chat.scrollTop = chat.scrollHeight;
-  return b;
-}
-function appendInline(parent, text) {
-  const pattern = /(\\*\\*[^*]+\\*\\*|\\x60[^\\x60]+\\x60)/g;
-  let last = 0;
-  for (const match of text.matchAll(pattern)) {
-    parent.appendChild(document.createTextNode(text.slice(last, match.index)));
-    const token = match[0], el = document.createElement(token.startsWith("**") ? "strong" : "code");
-    el.textContent = token.startsWith("**") ? token.slice(2, -2) : token.slice(1, -1);
-    parent.appendChild(el); last = match.index + token.length;
-  }
-  parent.appendChild(document.createTextNode(text.slice(last)));
-}
-function renderSafeMarkdown(parent, text) {
-  parent.textContent = "";
-  text.split("\\n").forEach((line, index) => {
-    const el = document.createElement("div");
-    if (/^#{1,3}\\s/.test(line)) { el.className = "md-heading"; line = line.replace(/^#{1,3}\\s+/, ""); }
-    else if (/^[-*]\\s/.test(line)) { el.className = "md-list"; line = "• " + line.replace(/^[-*]\\s+/, ""); }
-    appendInline(el, line); parent.appendChild(el);
-    if (index === text.split("\\n").length - 1 && line === "") el.remove();
-  });
-}
-function save() { try { sessionStorage.setItem("fire-convs", JSON.stringify(convs.slice(0, 30))); } catch {} }
-function closeSide() { document.body.classList.remove("side-open"); }
-
-async function requestChat(text, history) {
-  const headers={ "Content-Type":"application/json" }; if (chatToken) headers.Authorization="Bearer "+chatToken;
-  const options = { method: "POST", headers, body: JSON.stringify({ message: text, history }) };
-  let res = await fetch("/api/chat", options);
-  if (res.status === 401) {
-    const entered = window.prompt("접속 토큰을 입력하세요.");
-    if (!entered) throw new Error("인증이 필요합니다.");
-    chatToken = entered.trim();
-    sessionStorage.setItem("fire-chat-token", chatToken);
-    headers.Authorization = "Bearer " + chatToken;
-    res = await fetch("/api/chat", options);
-  }
-  if (!res.ok) {
-    const known = { 429: "요청이 너무 많습니다. 1분 후 다시 시도하세요.", 401: "접속 토큰이 올바르지 않습니다.", 503: "서버에 LLM이 설정되지 않아 챗봇을 사용할 수 없습니다. 관리자에게 문의하세요." };
-    throw new Error(known[res.status] || "요청 실패 (HTTP " + res.status + ")");
-  }
-  return res.json();
-}
-
-async function ask(text) {
-  if (!text.trim() || send.disabled) return;
-  if (current === null) { convs.unshift({ title: text.slice(0, 28), msgs: [] }); current = 0; renderList(); }
-  const targetConv = convs[current];
-  if (empty.parentNode) empty.remove();
-  targetConv.msgs.push({ role: "user", text });
-  const history = targetConv.msgs.slice(0, -1).slice(-8).map(m => ({ role: m.role === "user" ? "user" : "assistant", text: m.text }));
-  addRow("user", text);
-  input.value = ""; input.style.height = "auto"; send.disabled = true;
-  const thinking = addRow("bot", "조회 중…");
-  // AI 요약을 쓰면 수십 초가 걸릴 수 있어 경과 시간을 보여준다 (멈춘 것으로 오해 방지)
-  const startedAt = Date.now();
-  const ticker = setInterval(() => {
-    if (convs[current] !== targetConv) return;
-    const sec = Math.round((Date.now() - startedAt) / 1000);
-    thinking.textContent = sec < 5 ? "조회 중…" : "조회하고 답변을 정리하는 중… " + sec + "초";
-  }, 1000);
-  try {
-    const data = await requestChat(text, history);
-    const engine = data.provider ? " · " + data.provider + "/" + (data.model || "unknown") : "";
-    const meta = (data.mode === "llm" ? "AI 답변" : "조회 결과 원문") + engine + " · 근거: " + data.tool;
-    if (convs.includes(targetConv)) targetConv.msgs.push({ role: "bot", text: data.answer, meta });
-    if (convs[current] === targetConv) {
-      renderSafeMarkdown(thinking, data.answer);
-      const mm = document.createElement("div"); mm.className = "meta"; mm.textContent = meta; thinking.appendChild(mm);
-    }
-  } catch (e) {
-    if (convs[current] === targetConv) thinking.textContent = "요청 실패: " + (e.message || "서버에 연결할 수 없습니다.");
-  } finally {
-    clearInterval(ticker);
-  }
-  save(); send.disabled = false; chat.scrollTop = chat.scrollHeight; input.focus();
-}
-
-send.onclick = () => ask(input.value);
-input.addEventListener("keydown", e => {
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(input.value); }
-});
-input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; });
-document.getElementById("newChat").onclick = () => { current = null; renderConv(); renderList(); };
-document.querySelectorAll(".ex").forEach(el => el.onclick = () => ask(el.textContent));
-document.getElementById("menu").onclick = () => document.body.classList.toggle("side-open");
-renderList(); renderConv();
-</script>
+<script>${CHAT_SCRIPT}</script>
 </body>
 </html>`

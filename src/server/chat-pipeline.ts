@@ -13,6 +13,7 @@ export interface ChatMessage {
 
 export interface ChatResult {
   answer: string
+  sources?: string // "[자료 N] 도구명\n원문" 합본 — UI가 접어서 표시하고 검증 근거로 병기
   mode: "llm" | "lookup"
   tool: string
   provider?: string
@@ -21,10 +22,18 @@ export interface ChatResult {
 
 const ANSWER_SYSTEM = `너는 소방 실무자를 돕는 답변자다. [조회된 자료]에 있는 내용만으로 질문에 한국어로 답한다.
 규칙:
-- 자료에 없는 사실·수치·조문을 만들지 않는다. 자료에 없으면 "조회된 자료에서 확인되지 않는다"고 말한다.
+- 반드시 존댓말(~합니다, ~됩니다, ~하십시오)로 답한다. 평서체(~하다, ~된다)를 쓰지 않는다.
+- 자료에 없는 사실·수치·조문을 만들지 않는다. 자료에 없으면 "조회된 자료에서 확인되지 않는다"고 말하고,
+  아래에서 맞는 안내처를 한 줄로 권한다.
+  · 전체 구급활동·연간 통계 → 소방청 통계연보 (소방청 홈페이지 행정자료)
+  · 판례 전문·판시사항 → 대법원 종합법률정보
+  · 화재안전기준(NFPC·NFTC) 전문 → 국립소방연구원 홈페이지
+  · 화재 상세 통계 → 국가화재정보시스템(NFDS)
+  · 건물별 전체 소방시설 현황 → 관할 소방서
 - 주장·수치·기준을 담은 문장 끝에 근거 자료 번호를 [자료 N] 형식으로 붙인다.
-- 자료끼리 내용이 충돌하면 충돌 사실을 밝힌다.
-- 출력은 답변 본문만 쓴다. 머리말, JSON, 마크다운 헤더를 쓰지 않는다.`
+- 읽기 쉽게 구조화한다: 필요하면 ### 소제목, 번호 목록(1. 2.)·글머리표(- ), 핵심 수치·결론은 **굵게**.
+- 마크다운 표(| 구분)와 JSON, 코드블록, 머리말·맺음말은 쓰지 않는다.
+- 자료끼리 내용이 충돌하면 충돌 사실을 밝힌다.`
 
 function priorContextMissing(message: string, history: ChatMessage[]): boolean {
   return history.length === 0 && /^(그중|그 중|위에서|방금|그거|그것|몇 번째|\d+번)/.test(message.trim())
@@ -124,12 +133,15 @@ export async function handleChat(
     const answer = citedAnswer(raw, found.used.length)
     if (!answer) throw new Error("LLM 답변에 유효한 [자료 N] 인용이 없습니다.")
     return {
-      answer: `${answer}${failNote}\n\n[공식 조회 자료]\n${found.text}`,
+      answer: `${answer}${failNote}`, sources: found.text,
       mode: "llm", tool: found.used.join(", "), provider: adapter.name, model: adapter.model ?? "unknown",
     }
   } catch (err) {
     const detail = maskSensitiveUrl(err instanceof Error ? err.message : String(err))
     console.error("LLM 답변 생성 실패, 공식 원문 반환:", detail)
-    return { answer: `(AI 답변 생성에 실패해 조회 결과 원문을 표시합니다)\n\n${found.text}${failNote}`, mode: "lookup", tool: found.used.join(", ") }
+    return {
+      answer: `(AI 답변 생성에 실패해 조회 결과 원문을 표시합니다)${failNote}`, sources: found.text,
+      mode: "lookup", tool: found.used.join(", "),
+    }
   }
 }
