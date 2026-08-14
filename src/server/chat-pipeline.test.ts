@@ -120,6 +120,60 @@ describe("chat-pipeline — 무조건 조회 구조", () => {
     expect(result.sources).toContain("소방기본법")
   })
 
+  it("자료가 부족하면 [추가조회] 신호로 1회 더 조회하고 최종 답변을 만든다", async () => {
+    let llmCalls = 0
+    const fake: LlmAdapter = {
+      name: "fake",
+      generate: async (system, user) => {
+        llmCalls++
+        if (system.includes("계획기")) {
+          return user.includes("부족한 자료")
+            ? '{"calls":[{"tool":"search_fire_law","args":{"query":"소방기본법 목적"}}]}'
+            : '{"calls":[{"tool":"search_fire_law","args":{"query":"소방기본법"}}]}'
+        }
+        if (system.includes("추가 조회는 이미 마쳤다")) return "추가 자료까지 확인했습니다 [자료 2]."
+        return "[추가조회] 소방기본법 목적 조문 원문"
+      },
+    }
+    const result = await handleChat("소방기본법 목적이 뭐야", createClients(), fake)
+    expect(result.mode).toBe("llm")
+    expect(result.answer).toContain("[자료 2]") // 추가 조회분이 이어진 번호로 병합됨
+    expect(result.sources).toContain("[자료 2]")
+    expect(llmCalls).toBe(4) // 계획+답변+추가계획+최종답변 — 그 이상 없음
+  })
+
+  it("최종 답변이 또 [추가조회]를 내면 루프 없이 원문 폴백한다", async () => {
+    let llmCalls = 0
+    const fake: LlmAdapter = {
+      name: "fake",
+      generate: async (system) => {
+        llmCalls++
+        if (system.includes("계획기")) return '{"calls":[{"tool":"search_fire_law","args":{"query":"소방기본법"}}]}'
+        return "[추가조회] 또 필요합니다"
+      },
+    }
+    const result = await handleChat("소방기본법 검색", createClients(), fake)
+    expect(result.mode).toBe("lookup") // 인용 없는 마커는 폐기 → 원문 폴백
+    expect(result.sources).toContain("소방기본법")
+    expect(llmCalls).toBe(4)
+  })
+
+  it("추가 계획이 무효여도 기존 자료로 최종 답변을 만든다", async () => {
+    const fake: LlmAdapter = {
+      name: "fake",
+      generate: async (system, user) => {
+        if (system.includes("계획기")) {
+          return user.includes("부족한 자료") ? "계획 못 세움" : '{"calls":[{"tool":"search_fire_law","args":{"query":"소방기본법"}}]}'
+        }
+        if (system.includes("추가 조회는 이미 마쳤다")) return "기존 자료 기준으로 답합니다 [자료 1]."
+        return "[추가조회] 뭔가 더"
+      },
+    }
+    const result = await handleChat("소방기본법 검색", createClients(), fake)
+    expect(result.mode).toBe("llm")
+    expect(result.answer).toContain("[자료 1]")
+  })
+
   it("일부 문장에만 인용한 답변도 유효 인용이 1개 이상이면 채택한다", async () => {
     const fake: LlmAdapter = {
       name: "fake",

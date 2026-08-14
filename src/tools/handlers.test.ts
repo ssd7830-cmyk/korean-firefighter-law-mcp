@@ -328,6 +328,48 @@ describe("의도: 내용 질문도 답이 나온다 (본문검색 폴백)", () =
     expect(result.content[0].text).toContain("본문 검색")
   })
 
+  it("규칙명이 정확 일치하지 않으면 토큰 일치 후보 중 최단 이름을 고른다 (간이·조기진압용 배제)", async () => {
+    const client = {
+      search: vi.fn(async () => ({
+        AdmRulSearch: { admrul: [
+          { 행정규칙명: "간이스프링클러설비의 화재안전기술기준(NFTC 103A)", 행정규칙일련번호: "1" },
+          { 행정규칙명: "스프링클러설비의 화재안전기술기준(NFTC 103)", 행정규칙일련번호: "2" },
+          { 행정규칙명: "화재조기진압용 스프링클러설비의 화재안전기술기준(NFTC 103B)", 행정규칙일련번호: "3" },
+        ] },
+      })),
+      service: vi.fn(async () => ({
+        AdmRulService: {
+          행정규칙기본정보: { 행정규칙명: "스프링클러설비의 화재안전기술기준(NFTC 103)" },
+          조문내용: { 조문단위: { 조문내용: "2.7.3 헤드까지의 수평거리는 2.1미터 이하로 한다." } },
+        },
+      })),
+    } as any
+    const result = await getFireAdminRuleText(client, { ruleName: "스프링클러설비 화재안전기술기준", section: "헤드 수평거리" })
+    expect(client.service.mock.calls[0][1].ID).toBe("2") // 간이(1)가 아니라 기본 기준(2)
+    expect(result.content[0].text).toContain("수평거리는 2.1미터") // 토큰 AND로 "헤드까지의 수평거리" 매칭
+  })
+
+  it("절 번호 section은 줄 시작 매칭 — 번호를 인용만 한 다른 절은 제외한다", async () => {
+    const client = {
+      search: vi.fn(),
+      service: vi.fn(async () => ({
+        AdmRulService: {
+          행정규칙기본정보: { 행정규칙명: "스프링클러설비의 화재안전기술기준(NFTC 103)" },
+          조문내용: { 조문단위: [
+            { 조문내용: "1.7 이 기준에서 사용하는 용어의 정의는 다음과 같다." },
+            { 조문내용: "2.5.9.3 신축배관의 설치길이는 2.7.3의 거리를 초과하지 않아야 한다." },
+            { 조문내용: "2.7.3 헤드까지의 수평거리는 2.1미터 이하로 한다." },
+          ] },
+        },
+      })),
+    } as any
+    const result = await getFireAdminRuleText(client, { id: "77", section: "2.7" })
+    const text = result.content[0].text
+    expect(text).toContain("수평거리는 2.1미터")
+    expect(text).not.toContain("신축배관") // "2.7.3을 인용"한 절은 제외
+    expect(text).not.toContain("용어의 정의")
+  })
+
   it("본문검색 폴백은 가나다순 무관 규정보다 소방 소관·제목 일치를 앞세운다", async () => {
     const client = {
       search: vi

@@ -30,6 +30,9 @@ const ANSWER_SYSTEM = `너는 소방 실무자를 돕는 답변자다. [조회�
   · 화재안전기준(NFPC·NFTC) 전문 → 국립소방연구원 홈페이지
   · 화재 상세 통계 → 국가화재정보시스템(NFDS)
   · 건물별 전체 소방시설 현황 → 관할 소방서
+- 자료만으로 질문의 핵심에 답할 수 없고 무엇을 더 조회하면 되는지 명확하면, 다른 말 없이 첫 줄을
+  "[추가조회]"로 시작해 필요한 자료를 한 문장으로 쓴다 (예: [추가조회] NFTC 103의 헤드 설치 간격 절 원문).
+  안내처 권고는 추가 조회로도 확인할 수 없을 때 쓴다.
 - 주장·수치·기준을 담은 문장 끝에 근거 자료 번호를 [자료 N] 형식으로 붙인다.
 - 읽기 쉽게 구조화한다: 필요하면 ### 소제목, 번호 목록(1. 2.)·글머리표(- ), 핵심 수치·결론은 **굵게**.
 - 마크다운 표(| 구분)와 JSON, 코드블록, 머리말·맺음말은 쓰지 않는다.
@@ -56,7 +59,7 @@ interface Retrieved {
   error?: string // 전부 실패 시 사용자 안내
 }
 
-async function retrieve(routes: RoutedQuery[], clients: Clients): Promise<Retrieved> {
+async function retrieve(routes: RoutedQuery[], clients: Clients, startAt = 0): Promise<Retrieved> {
   const results = await Promise.all(
     routes.map(async (route) => {
       const tool = allTools.find((candidate) => candidate.name === route.tool)
@@ -87,7 +90,7 @@ async function retrieve(routes: RoutedQuery[], clients: Clients): Promise<Retrie
   // 합본을 끝에서 자르면 뒤쪽 자료 번호와 본문이 통째로 사라진다. 성공 자료 모두에 예산을 나눠 병기한다.
   const perSourceLimit = Math.min(12_000, Math.floor(23_500 / oks.length))
   const text = oks
-    .map((r, i) => `[자료 ${i + 1}] ${r.route.tool}\n${truncate(r.text as string, perSourceLimit)}`)
+    .map((r, i) => `[자료 ${startAt + i + 1}] ${r.route.tool}\n${truncate(r.text as string, perSourceLimit)}`)
     .join("\n\n")
   return { text, used: oks.map((r) => r.route.tool), failed: fails.map((f) => f.route.tool) }
 }
@@ -123,13 +126,34 @@ export async function handleChat(
       mode: "lookup", tool: "routing",
     }
   }
-  const found = await retrieve(plan, clients)
+  let found = await retrieve(plan, clients)
   if (found.error) return { answer: found.error, mode: "lookup", tool: found.failed.join(", ") }
-  const failNote = found.failed.length ? `\n\n(일부 조회 실패: ${found.failed.join(", ")})` : ""
 
   try {
     const context = history.length ? `\n[직전 대화]\n${history.slice(-8).map((m) => `${m.role}: ${m.text}`).join("\n")}` : ""
-    const raw = await adapter.generate(ANSWER_SYSTEM, `질문: ${message}${context}\n\n[조회된 자료]\n${found.text}`)
+    let raw = await adapter.generate(ANSWER_SYSTEM, `질문: ${message}${context}\n\n[조회된 자료]\n${found.text}`)
+    const hint = raw.trim().startsWith("[추가조회]") ? raw.trim().slice("[추가조회]".length).trim().slice(0, 300) : null
+    if (hint) {
+      // 자료 부족 신호 — 플래너 재호출로 딱 1라운드 추가 조회 후 최종 답변 (루프 금지)
+      const morePlan = await llmPlan(`${message}\n(이미 조회함: ${found.used.join(", ")} / 부족한 자료: ${hint})`, adapter, history)
+      const seen = new Set(plan.map((r) => r.tool + JSON.stringify(r.args)))
+      const fresh = (morePlan ?? []).filter((r) => !seen.has(r.tool + JSON.stringify(r.args)))
+      if (fresh.length) {
+        const extra = await retrieve(fresh, clients, found.used.length)
+        if (!extra.error) {
+          found = {
+            text: `${found.text}\n\n${extra.text}`,
+            used: [...found.used, ...extra.used],
+            failed: [...found.failed, ...extra.failed],
+          }
+        }
+      }
+      raw = await adapter.generate(
+        `${ANSWER_SYSTEM}\n- 추가 조회는 이미 마쳤다. [추가조회]를 쓰지 말고 지금 자료만으로 답한다.`,
+        `질문: ${message}${context}\n\n[조회된 자료]\n${found.text}`
+      )
+    }
+    const failNote = found.failed.length ? `\n\n(일부 조회 실패: ${found.failed.join(", ")})` : ""
     const answer = citedAnswer(raw, found.used.length)
     if (!answer) throw new Error("LLM 답변에 유효한 [자료 N] 인용이 없습니다.")
     return {
@@ -139,6 +163,7 @@ export async function handleChat(
   } catch (err) {
     const detail = maskSensitiveUrl(err instanceof Error ? err.message : String(err))
     console.error("LLM 답변 생성 실패, 공식 원문 반환:", detail)
+    const failNote = found.failed.length ? `\n\n(일부 조회 실패: ${found.failed.join(", ")})` : ""
     return {
       answer: `(AI 답변 생성에 실패해 조회 결과 원문을 표시합니다)${failNote}`, sources: found.text,
       mode: "lookup", tool: found.used.join(", "),

@@ -87,6 +87,7 @@ export async function llmPlan(
       const parsed = tool.schema.safeParse(candidate?.args ?? {})
       if (parsed.success) valid.push({ tool: tool.name, args: parsed.data as Record<string, unknown> })
     }
+    if (valid.length) console.error(`LLM 계획: ${valid.map((v) => `${v.tool} ${JSON.stringify(v.args)}`).join(" / ")}`)
     return valid.length ? valid.slice(0, MAX_PLAN_CALLS) : null
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
