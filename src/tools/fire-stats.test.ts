@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { statsTtl } from "./fire-stats.js"
+import { statsTtlFor as statsTtl } from "../lib/cache.js"
 import { TTL } from "../lib/cache.js"
 
 describe("statsTtl — 확정 통계 캐시 정책", () => {
