@@ -118,14 +118,22 @@ export async function getFireAdminRuleText(
   const numeric = sec && /^\d+(\.\d+)*$/.test(sec)
     ? unique.filter((line) => new RegExp(`^${sec.replace(/\./g, "\\.")}(?![0-9])`).test(line.trim()))
     : []
+  // "제10조"도 줄 시작 매칭 — 키워드 경로로 빠지면 excerpt 창에 조문 뒷부분(수치 표)이 잘린다
+  const jo = sec?.match(/^제?(\d+)조(의\d+)?$/)
+  const joPrefix = jo ? `제${jo[1]}조${jo[2] ?? ""}` : null
+  const joLines = joPrefix
+    ? unique.filter((line) => line.trim().startsWith(joPrefix) && (jo![2] || !line.trim().startsWith(`${joPrefix}의`)))
+    : []
   // 키워드 절 검색은 토큰 AND — "헤드 수평거리"가 "헤드까지의 수평거리"와도 일치해야 한다
   const secToks = sec ? sec.split(/\s+/).filter(Boolean) : []
   const selected = !sec
     ? unique
     : numeric.length
       ? numeric
-      : unique.filter((line) => secToks.every((t) => line.includes(t)))
+      : joLines.length
+        ? joLines
+        : unique.filter((line) => secToks.every((t) => line.includes(t)))
   if (selected.length === 0) return emptyResult(`${title} — "${args.section}" 부분을 원문에서 찾지 못했습니다.`)
-  const display = sec && !numeric.length ? selected.map((line) => excerpt(line, secToks[0])) : selected
+  const display = sec && !numeric.length && !joLines.length ? selected.map((line) => excerpt(line, secToks[0])) : selected
   return textResult(truncate(`${title} [행정규칙 ID:${id}]${args.section ? ` — ${args.section}` : ""}\n\n${display.join("\n")}`))
 }

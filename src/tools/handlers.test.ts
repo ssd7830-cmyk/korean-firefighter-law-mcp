@@ -349,6 +349,27 @@ describe("의도: 내용 질문도 답이 나온다 (본문검색 폴백)", () =
     expect(result.content[0].text).toContain("수평거리는 2.1미터") // 토큰 AND로 "헤드까지의 수평거리" 매칭
   })
 
+  it("조 번호 section(제10조)도 줄 시작 매칭 — 제10조의2와 excerpt 잘림을 피한다", async () => {
+    const client = {
+      search: vi.fn(),
+      service: vi.fn(async () => ({
+        AdmRulService: {
+          행정규칙기본정보: { 행정규칙명: "스프링클러설비의 화재안전성능기준(NFPC 103)" },
+          조문내용: { 조문단위: [
+            { 조문내용: "제10조(헤드) 스프링클러헤드 수평거리는 2.1미터 이하로 한다." },
+            { 조문내용: "제10조의2(경보설비) 별도 규정." },
+            { 조문내용: "제11조(배관) 제10조에 따른 헤드와 연결한다." },
+          ] },
+        },
+      })),
+    } as any
+    const result = await getFireAdminRuleText(client, { id: "5", section: "제10조" })
+    const text = result.content[0].text
+    expect(text).toContain("수평거리는 2.1미터")
+    expect(text).not.toContain("경보설비") // 제10조의2 제외
+    expect(text).not.toContain("배관") // 제10조를 인용만 한 조 제외
+  })
+
   it("절 번호 section은 줄 시작 매칭 — 번호를 인용만 한 다른 절은 제외한다", async () => {
     const client = {
       search: vi.fn(),

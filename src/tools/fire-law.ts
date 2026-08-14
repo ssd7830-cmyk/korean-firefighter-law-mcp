@@ -154,11 +154,13 @@ export async function getFireLawAnnex(client: LawApiClient, args: GetFireLawAnne
   if (selected.length === 0) return emptyResult(`${title} — 별표 ${wanted ?? ""}를 찾지 못했습니다.`)
   const lines: string[] = []
   for (const annex of selected) collectText(annex, lines)
-  const filtered = args.query ? lines.filter((line) => line.includes(args.query!)).map((line) => {
-    const at = line.indexOf(args.query!)
+  // 키워드는 토큰 AND — "제1석유류 수용성"이 원문의 다른 어순·조사와도 일치해야 한다
+  const toks = args.query?.split(/\s+/).filter(Boolean) ?? []
+  const filtered = toks.length ? lines.filter((line) => toks.every((t) => line.includes(t))).map((line) => {
+    const at = line.indexOf(toks[0])
     if (line.length <= 1800) return line
     const start = Math.max(0, at - 800)
-    const end = Math.min(line.length, at + args.query!.length + 800)
+    const end = Math.min(line.length, at + toks[0].length + 800)
     return `${start ? "…" : ""}${line.slice(start, end)}${end < line.length ? "…" : ""}`
   }) : lines
   if (filtered.length === 0) return emptyResult(`${title} 별표 ${wanted ?? ""} — "${args.query}"를 찾지 못했습니다.`)
