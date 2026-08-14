@@ -26,8 +26,7 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
 }
 
-export function startHttpServer(clients: Clients, port: number): HttpServer {
-  const adapter = createLlmAdapter()
+export function startHttpServer(clients: Clients, port: number, adapter = createLlmAdapter()): HttpServer {
   const mcpAuthToken = process.env.SERVER_AUTH_TOKEN
   const chatAuthToken = process.env.CHAT_AUTH_TOKEN || mcpAuthToken
   const host = httpHost(process.env.HOST)
@@ -45,7 +44,7 @@ export function startHttpServer(clients: Clients, port: number): HttpServer {
       }
       if (req.url === "/status") {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify({
-          status: "ok", mode: adapter ? "llm" : "lookup", provider: adapter?.name ?? null, model: adapter?.model ?? null,
+          status: "ok", mode: adapter ? "llm" : "chat-disabled", provider: adapter?.name ?? null, model: adapter?.model ?? null,
         }))
         return
       }
@@ -62,6 +61,12 @@ export function startHttpServer(clients: Clients, port: number): HttpServer {
         }
         if (chatAuthToken && !authorized(req.headers.authorization, chatAuthToken)) {
           res.writeHead(401, { "Content-Type": "text/plain" }).end("unauthorized")
+          return
+        }
+        // 챗봇 라우팅은 LLM 전용 — 어댑터가 없으면 추측 조회 대신 명확히 거부 (/mcp는 영향 없음)
+        if (!adapter) {
+          res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" })
+            .end("LLM이 설정되지 않아 챗봇을 사용할 수 없습니다. DEPLOY.md 'LLM 연결'을 참조하세요.")
           return
         }
         if (!chatRateLimiter.allow(clientIp(req, trustProxy))) {
@@ -150,7 +155,7 @@ export function startHttpServer(clients: Clients, port: number): HttpServer {
   httpServer.listen(port, host, () => {
     const address = httpServer.address()
     const actualPort = typeof address === "object" && address ? address.port : port
-    const llmNote = adapter ? `AI 답변 모드 (${adapter.name})` : "조회 모드 (LLM 키 없음 — DEPLOY.md 'LLM 연결' 참조)"
+    const llmNote = adapter ? `AI 답변 모드 (${adapter.name})` : "비활성 — LLM 설정 필요 (DEPLOY.md 'LLM 연결' 참조), MCP는 정상 동작"
     console.error(
       `korean-firefighter-law-mcp HTTP 모드 시작 (${host}:${actualPort})\n` +
         `  챗봇:     GET  /        — ${llmNote}\n` +

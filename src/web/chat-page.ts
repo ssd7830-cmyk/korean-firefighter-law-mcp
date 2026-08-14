@@ -144,9 +144,8 @@ async function requestChat(text, history) {
     res = await fetch("/api/chat", options);
   }
   if (!res.ok) {
-    if (res.status === 429) throw new Error("요청이 너무 많습니다. 1분 후 다시 시도하세요.");
-    if (res.status === 401) throw new Error("접속 토큰이 올바르지 않습니다.");
-    throw new Error("요청 실패 (HTTP " + res.status + ")");
+    const known = { 429: "요청이 너무 많습니다. 1분 후 다시 시도하세요.", 401: "접속 토큰이 올바르지 않습니다.", 503: "서버에 LLM이 설정되지 않아 챗봇을 사용할 수 없습니다. 관리자에게 문의하세요." };
+    throw new Error(known[res.status] || "요청 실패 (HTTP " + res.status + ")");
   }
   return res.json();
 }

@@ -1,6 +1,6 @@
 # 기관 서버형 배포 안내
 
-> 적용 버전: v0.6.0 / 대상: 기관 서버·시범운영 담당자
+> 적용 버전: v0.8.0 / 대상: 기관 서버·시범운영 담당자
 
 기관 서버형은 서버 한 대에서 다음 인터페이스를 제공합니다.
 
@@ -8,7 +8,7 @@
 - `POST /api/chat` — 기관 서비스가 호출할 자연어 질의 API
 - `POST /mcp` — 원격 Streamable HTTP MCP
 - `GET /health` — 생존 확인
-- `GET /status` — 조회/LLM 모드와 실제 공급자·모델 확인
+- `GET /status` — LLM 공급자·모델과 챗봇 활성 여부 확인 (`llm` 또는 `chat-disabled`)
 
 각 PC에 설치하려면 [LOCAL_SETUP.md](LOCAL_SETUP.md)를 사용합니다.
 
@@ -21,7 +21,8 @@
 5. ChatGPT/Claude 원격 MCP를 쓸 경우 해당 서비스의 요금제·관리자 권한·인증 방식과 기관 승인 여부를
    현재 공식 문서로 다시 확인합니다.
 
-LLM은 선택입니다. 설정하지 않으면 질문을 규칙으로 분류하고 공식 API 조회 결과 원문만 보여줍니다.
+웹 채팅과 `/api/chat`에는 LLM이 필수입니다. LLM을 설정하지 않으면 챗봇은 503으로 비활성화되며,
+`/mcp` 원격 MCP(연결한 AI 클라이언트의 LLM이 라우팅)만 제공됩니다.
 
 ## 2. 정부 API 키 준비
 
@@ -61,9 +62,9 @@ CHAT_AUTH_TOKEN=브라우저용-별도-긴-무작위-토큰
 ```
 
 ```bash
-docker build -t firefighter-mcp:v0.6.0 .
+docker build -t firefighter-mcp:v0.8.0 .
 docker run -d --name firefighter-mcp --restart=unless-stopped \
-  -p 127.0.0.1:8080:8080 --env-file .env firefighter-mcp:v0.6.0
+  -p 127.0.0.1:8080:8080 --env-file .env firefighter-mcp:v0.8.0
 curl http://127.0.0.1:8080/health
 ```
 
@@ -83,7 +84,7 @@ node build/index.js --mode http
 
 ## 4. LLM 연결
 
-다음 중 하나의 키를 서버 환경변수로 설정합니다.
+웹 채팅·`/api/chat`을 운영하려면 LLM 연결이 필수입니다. 다음 중 하나의 키를 서버 환경변수로 설정합니다.
 
 | 변수 | 공급자 | 현재 기본 모델 |
 |---|---|---|
@@ -93,10 +94,11 @@ node build/index.js --mode http
 
 여러 키가 있으면 `LLM_PROVIDER=gemini|claude|openai`로 선택하고, `LLM_MODEL`로 기관이 검증한 모델 ID를
 고정할 수 있습니다. 모델 수명과 가격은 자주 바뀌므로 공급자의 현재 모델·가격·데이터 통제 문서를 기준으로
-예산과 갱신 일정을 정합니다. 질문 1건은 라우팅과 답변에 최대 2회 LLM 호출을 사용합니다.
+예산과 갱신 일정을 정합니다. 질문 1건은 계획과 답변에 최대 2회 LLM 호출, 최대 4건의 공식 API 조회를
+사용합니다.
 
-LLM을 켜도 자유 요약문은 표시하지 않습니다. 모델은 관련 근거 구절만 고르고, 서버가 조회 원문과 글자 단위로
-일치하는 구절만 통과시킵니다. 공식 조회 원문도 함께 표시하며 이 결과 역시 기관의 공식 해석은 아닙니다.
+답변은 공식 조회 자료에 있는 내용만으로 작성되며 문장마다 `[자료 N]` 근거 번호를 인용합니다. 서버는 인용
+번호의 실존을 검증하고 공식 조회 원문을 항상 함께 표시합니다. 이 결과 역시 기관의 공식 해석은 아닙니다.
 
 로컬 개발·시연에는 `LLM_PROVIDER=claude-cli` 또는 `codex-cli`를 명시할 수 있습니다. CLI 질문은 stdin으로
 전달되고 세션 비저장·제한 모드로 실행되지만, 개인 로그인을 공유하는 방식이므로 기관 서버 운영은 위 API

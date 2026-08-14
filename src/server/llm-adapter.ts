@@ -5,7 +5,7 @@
  * 키:   GEMINI_API_KEY | ANTHROPIC_API_KEY | OPENAI_API_KEY
  *       claude-cli/codex-cli는 API 키 없이 로컬에 설치·로그인된 CLI 계정을 사용한다.
  * 모델: LLM_MODEL (미지정 시 provider별 기본값)
- * 아무것도 지정하지 않으면 null → 챗봇은 "조회 모드"로 동작 (조회 결과 원문 표시)
+ * 아무것도 지정하지 않으면 null → HTTP 챗봇 비활성(503). /mcp와 stdio는 LLM 없이 동작한다.
  */
 
 import Anthropic from "@anthropic-ai/sdk"

@@ -6,6 +6,17 @@ import { startHttpServer } from "./http-server.js"
 import { createClients } from "./factory.js"
 import { requestContext } from "../lib/request-context.js"
 import type { Clients } from "../tool-registry.js"
+import type { LlmAdapter } from "./llm-adapter.js"
+
+// 챗봇은 LLM 필수 — HTTP 테스트는 결정적 계획·답변을 주는 가짜 어댑터를 주입한다
+const fakeAdapter: LlmAdapter = {
+  name: "fake",
+  model: "fake-model",
+  generate: async (system) =>
+    system.includes("계획기")
+      ? '{"calls":[{"tool":"search_fire_law","args":{"query":"소방기본법"}}]}'
+      : "조회 결과를 확인했습니다 [자료 1]",
+}
 
 const MCP_HEADERS = {
   "Content-Type": "application/json",
@@ -55,7 +66,7 @@ let primaryServer: HttpServer
 let urlBase: string
 
 beforeAll(async () => {
-  primaryServer = startHttpServer(createClients(), 0)
+  primaryServer = startHttpServer(createClients(), 0, fakeAdapter)
   urlBase = await serverUrl(primaryServer)
 })
 
@@ -119,7 +130,7 @@ describe("SERVER_AUTH_TOKEN — 접근 보호", () => {
 
   beforeAll(async () => {
     process.env.SERVER_AUTH_TOKEN = "secret-token"
-    authServer = startHttpServer(createClients(), 0)
+    authServer = startHttpServer(createClients(), 0, fakeAdapter)
     authBase = await serverUrl(authServer)
   })
 
@@ -195,7 +206,7 @@ describe("챗봇 호출량 보호", () => {
 
   beforeAll(async () => {
     process.env.CHAT_RATE_LIMIT_PER_MINUTE = "1"
-    rateServer = startHttpServer(createClients(), 0)
+    rateServer = startHttpServer(createClients(), 0, fakeAdapter)
     rateBase = await serverUrl(rateServer)
     delete process.env.CHAT_RATE_LIMIT_PER_MINUTE
   })
@@ -216,6 +227,47 @@ describe("챗봇 호출량 보호", () => {
   })
 })
 
+describe("LLM 미설정 서버 — 챗봇 비활성, MCP는 정상", () => {
+  let bareServer: HttpServer
+  let bareBase: string
+
+  beforeAll(async () => {
+    bareServer = startHttpServer(createClients(), 0, null)
+    bareBase = await serverUrl(bareServer)
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => bareServer.close((err) => (err ? reject(err) : resolve())))
+  })
+
+  it("/api/chat은 503과 LLM 설정 안내를 반환한다 (추측 조회 없음)", async () => {
+    const res = await fetch(`${bareBase}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "소방기본법" }),
+    })
+    expect(res.status).toBe(503)
+    expect(await res.text()).toContain("LLM")
+  })
+
+  it("/status가 chat-disabled를 보고한다", async () => {
+    const json = await (await fetch(`${bareBase}/status`)).json()
+    expect(json).toMatchObject({ status: "ok", mode: "chat-disabled", provider: null })
+  })
+
+  it("/mcp 도구는 LLM 없이 동작한다 (클라이언트 LLM이 라우팅)", async () => {
+    const res = await fetch(`${bareBase}/mcp`, {
+      method: "POST",
+      headers: MCP_HEADERS,
+      body: rpc(1, "tools/list", {}),
+    })
+    const text = await res.text()
+    const dataLine = text.split("\n").find((l) => l.startsWith("data: "))
+    const json = JSON.parse(dataLine ? dataLine.slice(6) : text)
+    expect(json.result.tools.length).toBe(11)
+  })
+})
+
 describe("챗봇 요청별 정부 API 키", () => {
   let headerServer: HttpServer
   let headerBase: string
@@ -233,7 +285,7 @@ describe("챗봇 요청별 정부 API 키", () => {
       },
       fire: {},
     } as unknown as Clients
-    headerServer = startHttpServer(clients, 0)
+    headerServer = startHttpServer(clients, 0, fakeAdapter)
     headerBase = await serverUrl(headerServer)
   })
 

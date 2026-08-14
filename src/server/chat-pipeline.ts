@@ -1,10 +1,9 @@
-/** 질문을 공식 API 조회로 먼저 근거화한 뒤, LLM에는 근거 문장 선택만 허용한다. */
+/** 질문을 LLM 계획 → 공식 API 조회로 근거화한 뒤, LLM이 조회 자료 안에서만 인용을 달아 답한다. */
 import { allTools, type Clients } from "../tool-registry.js"
 import { maskSensitiveUrl } from "../lib/fetch-with-retry.js"
-import { extractFirstJsonObject } from "../lib/json-extract.js"
 import { truncate } from "../lib/format.js"
-import { questionValidationError, routeQuestion, type RoutedQuery } from "./query-router.js"
-import { llmRoute } from "./llm-router.js"
+import { isValidCompactDate } from "../lib/korean-date.js"
+import { llmPlan, type RoutedQuery } from "./llm-router.js"
 import type { LlmAdapter } from "./llm-adapter.js"
 
 export interface ChatMessage {
@@ -20,59 +19,91 @@ export interface ChatResult {
   model?: string
 }
 
-const GROUNDING_SYSTEM = `너는 공식 조회 원문에서 질문에 답하는 문장만 고르는 추출기다.
-출력은 JSON 객체 하나뿐이다: {"evidence":["조회 원문과 글자 단위로 완전히 같은 문장"]}
-규칙: evidence 각 값은 반드시 [조회된 자료]의 연속된 정확한 부분문자열이어야 한다. 바꾸어 쓰기, 요약, 추론, 설명, 마크다운을 금지한다. 관련 근거가 없으면 {"evidence":[]}를 출력한다.`
-
-function installationRoutes(message: string): RoutedQuery[] | null {
-  if (!/(아파트|공동주택)/.test(message) || !/스프링클러/.test(message) || !/(설치|기준|대상)/.test(message)) return null
-  return [
-    { tool: "get_fire_law_annex", args: { lawName: "소방시설 설치 및 관리에 관한 법률 시행령", annex: "4", query: "공동주택" } },
-    { tool: "get_fire_admin_rule_text", args: { ruleName: "NFPC 103" } },
-    { tool: "get_fire_admin_rule_text", args: { ruleName: "NFTC 103" } },
-  ]
-}
+const ANSWER_SYSTEM = `너는 소방 실무자를 돕는 답변자다. [조회된 자료]에 있는 내용만으로 질문에 한국어로 답한다.
+규칙:
+- 자료에 없는 사실·수치·조문을 만들지 않는다. 자료에 없으면 "조회된 자료에서 확인되지 않는다"고 말한다.
+- 주장·수치·기준을 담은 문장 끝에 근거 자료 번호를 [자료 N] 형식으로 붙인다.
+- 자료끼리 내용이 충돌하면 충돌 사실을 밝힌다.
+- 출력은 답변 본문만 쓴다. 머리말, JSON, 마크다운 헤더를 쓰지 않는다.`
 
 function priorContextMissing(message: string, history: ChatMessage[]): boolean {
   return history.length === 0 && /^(그중|그 중|위에서|방금|그거|그것|몇 번째|\d+번)/.test(message.trim())
 }
 
-async function retrieve(routes: RoutedQuery[], clients: Clients): Promise<{ text: string; tools: string; error?: string }> {
-  const parts: string[] = []
-  const used: string[] = []
-  for (const route of routes) {
-    const tool = allTools.find((candidate) => candidate.name === route.tool)
-    if (!tool) return { text: "", tools: "none", error: `질문을 처리할 도구를 찾지 못했습니다: ${route.tool}` }
-    try {
-      const result = await tool.handler(clients, route.args)
-      const text = result.content.map((content) => content.text).join("\n")
-      if (!result.isError && !/\n결과 없음/.test(text)) {
-        parts.push(`[${route.tool}]\n${truncate(text, 12_000)}`)
-        used.push(route.tool)
-      } else if (routes.length === 1) return { text, tools: route.tool, error: text }
-    } catch (err) {
-      const detail = maskSensitiveUrl(err instanceof Error ? err.message : String(err))
-      console.error(`공식 자료 조회 실패 (${route.tool}):`, detail)
-      if (routes.length === 1) return { text: "", tools: route.tool, error: `조회 중 오류가 발생했습니다: ${detail}` }
-    }
-  }
-  if (parts.length === 0) return { text: "", tools: routes.map((r) => r.tool).join(", "), error: "관련 공식 자료를 찾지 못했습니다." }
-  return { text: truncate(parts.join("\n\n"), 24_000), tools: used.join(", ") }
+/** 날짜처럼 쓴 값이 달력상 무효면 조회로 넘기지 않고 명확히 거부한다. */
+function questionValidationError(q: string): string | undefined {
+  const compact = q.match(/\b\d{8}\b/)?.[0]
+  if (compact && !isValidCompactDate(compact)) return `유효하지 않은 날짜입니다: ${compact}`
+  const m = q.match(/(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})일?/)
+  if (!m) return undefined
+  const value = `${m[1]}${m[2].padStart(2, "0")}${m[3].padStart(2, "0")}`
+  return isValidCompactDate(value) ? undefined : `유효하지 않은 날짜입니다: ${m[0]}`
 }
 
-function verifiedEvidence(raw: string, retrieved: string): string[] {
-  const parsed = extractFirstJsonObject(raw) as { evidence?: unknown } | null
-  if (!parsed || !Array.isArray(parsed.evidence)) return []
-  return [...new Set(parsed.evidence)]
-    .filter((value): value is string => typeof value === "string" && value.trim().length >= 4)
-    .filter((value) => retrieved.includes(value))
-    .slice(0, 12)
+interface Retrieved {
+  text: string // "[자료 N] 도구명\n원문" 블록 합본
+  used: string[] // 성공한 도구명 (자료 번호 순)
+  failed: string[] // 실패·0건 도구명
+  error?: string // 전부 실패 시 사용자 안내
+}
+
+async function retrieve(routes: RoutedQuery[], clients: Clients): Promise<Retrieved> {
+  const results = await Promise.all(
+    routes.map(async (route) => {
+      const tool = allTools.find((candidate) => candidate.name === route.tool)
+      if (!tool) return { route, text: null, detail: "미등록 도구" }
+      try {
+        const result = await tool.handler(clients, route.args)
+        const text = result.content.map((content) => content.text).join("\n")
+        if (result.isError || /\n결과 없음/.test(text)) return { route, text: null, detail: text }
+        return { route, text, detail: "" }
+      } catch (err) {
+        const detail = maskSensitiveUrl(err instanceof Error ? err.message : String(err))
+        console.error(`공식 자료 조회 실패 (${route.tool}):`, detail)
+        return { route, text: null, detail: `조회 오류: ${detail}` }
+      }
+    })
+  )
+  const oks = results.filter((r) => r.text !== null)
+  const fails = results.filter((r) => r.text === null)
+  if (oks.length === 0) {
+    const detail = fails.map((f) => `- ${f.route.tool}: ${truncate(f.detail, 600)}`).join("\n")
+    return {
+      text: "",
+      used: [],
+      failed: fails.map((f) => f.route.tool),
+      error: `공식 자료 조회에 실패했습니다.\n${detail}`,
+    }
+  }
+  // 합본을 끝에서 자르면 뒤쪽 자료 번호와 본문이 통째로 사라진다. 성공 자료 모두에 예산을 나눠 병기한다.
+  const perSourceLimit = Math.min(12_000, Math.floor(23_500 / oks.length))
+  const text = oks
+    .map((r, i) => `[자료 ${i + 1}] ${r.route.tool}\n${truncate(r.text as string, perSourceLimit)}`)
+    .join("\n\n")
+  return { text, used: oks.map((r) => r.route.tool), failed: fails.map((f) => f.route.tool) }
+}
+
+/** 답변의 각 문장이 실존하는 자료 번호를 1개 이상 인용해야 통과한다. */
+function citedAnswer(raw: string, sourceCount: number): string | null {
+  const answer = raw.trim()
+  if (!answer) return null
+  const sentences = answer
+    .split(/\n+/)
+    .flatMap((line) => line.match(/[^.!?。！？]+(?:[.!?。！？]+(?=\s|$)|$)/g) ?? [])
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+  if (sentences.length === 0) return null
+  for (const sentence of sentences) {
+    const cited = [...sentence.matchAll(/\[자료 (\d+)\]/g)].map((m) => Number(m[1]))
+    if (cited.length === 0 || cited.some((n) => n < 1 || n > sourceCount)) return null
+  }
+  return answer
 }
 
 export async function handleChat(
   message: string,
   clients: Clients,
-  adapter: LlmAdapter | null,
+  adapter: LlmAdapter,
   history: ChatMessage[] = []
 ): Promise<ChatResult> {
   const validation = questionValidationError(message)
@@ -80,24 +111,30 @@ export async function handleChat(
   if (priorContextMissing(message, history)) {
     return { answer: "이전 대화 내용이 전달되지 않아 대상을 알 수 없습니다. 무엇의 몇 번인지 함께 적어주세요.", mode: "lookup", tool: "context" }
   }
-  const primary = (adapter ? await llmRoute(message, adapter, history) : null) ?? routeQuestion(message)
-  const routes = installationRoutes(message) ?? [primary]
-  const found = await retrieve(routes, clients)
-  if (found.error) return { answer: found.error, mode: "lookup", tool: found.tools }
-  if (!adapter) return { answer: found.text, mode: "lookup", tool: found.tools }
+  const plan = await llmPlan(message, adapter, history)
+  if (!plan) {
+    // 계획 실패 시 추측 조회를 하지 않는다 — 틀린 자료보다 명확한 실패가 낫다
+    return {
+      answer: "질문을 조회 도구로 변환하지 못했습니다. 법령명·조 번호·날짜·지역 등을 구체적으로 적어 다시 질문해주세요.",
+      mode: "lookup", tool: "routing",
+    }
+  }
+  const found = await retrieve(plan, clients)
+  if (found.error) return { answer: found.error, mode: "lookup", tool: found.failed.join(", ") }
+  const failNote = found.failed.length ? `\n\n(일부 조회 실패: ${found.failed.join(", ")})` : ""
 
   try {
     const context = history.length ? `\n[직전 대화]\n${history.slice(-8).map((m) => `${m.role}: ${m.text}`).join("\n")}` : ""
-    const raw = await adapter.generate(GROUNDING_SYSTEM, `질문: ${message}${context}\n\n[조회된 자료]\n${found.text}`)
-    const evidence = verifiedEvidence(raw, found.text)
-    if (evidence.length === 0) throw new Error("LLM이 원문과 일치하는 근거를 반환하지 않았습니다.")
+    const raw = await adapter.generate(ANSWER_SYSTEM, `질문: ${message}${context}\n\n[조회된 자료]\n${found.text}`)
+    const answer = citedAnswer(raw, found.used.length)
+    if (!answer) throw new Error("LLM 답변에 유효한 [자료 N] 인용이 없습니다.")
     return {
-      answer: `[AI가 선별한 공식 근거]\n${evidence.map((item) => `- ${item}`).join("\n")}\n\n[공식 조회 원문]\n${found.text}`,
-      mode: "llm", tool: found.tools, provider: adapter.name, model: adapter.model ?? "unknown",
+      answer: `${answer}${failNote}\n\n[공식 조회 자료]\n${found.text}`,
+      mode: "llm", tool: found.used.join(", "), provider: adapter.name, model: adapter.model ?? "unknown",
     }
   } catch (err) {
     const detail = maskSensitiveUrl(err instanceof Error ? err.message : String(err))
-    console.error("LLM 근거 추출 실패, 공식 원문 반환:", detail)
-    return { answer: `(AI 답변 생성에 실패해 조회 결과 원문을 표시합니다)\n\n${found.text}`, mode: "lookup", tool: found.tools }
+    console.error("LLM 답변 생성 실패, 공식 원문 반환:", detail)
+    return { answer: `(AI 답변 생성에 실패해 조회 결과 원문을 표시합니다)\n\n${found.text}${failNote}`, mode: "lookup", tool: found.used.join(", ") }
   }
 }
