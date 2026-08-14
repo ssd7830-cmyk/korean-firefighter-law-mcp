@@ -17,8 +17,6 @@ export const SearchFireStatsSchema = z.object({
 
 export type SearchFireStatsInput = z.infer<typeof SearchFireStatsSchema>
 
-export { statsTtlFor as statsTtl }
-
 export async function searchFireStats(client: FireApiClient, args: SearchFireStatsInput): Promise<ToolResult> {
   const body = await client.call(
     "FireInformationService",
