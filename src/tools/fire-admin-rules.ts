@@ -3,9 +3,10 @@ import type { LawApiClient } from "../lib/law-api-client.js"
 import { toArray } from "../lib/xml.js"
 import { emptyResult, textResult, type ToolResult } from "../lib/errors.js"
 import { truncate } from "../lib/format.js"
+import { rankBodySearch } from "../lib/relevance.js"
 
 export const SearchFireAdminRulesSchema = z.object({
-  query: z.string().min(1).max(200).describe('검색어 — 시설명이면 충분 (예: "스프링클러", "옥내소화전", "방화문")'),
+  query: z.string().min(1).max(200).describe('검색어 — 시설명이면 충분 (예: "스프링클러", "옥내소화전", "자동화재탐지설비")'),
   display: z.number().int().min(1).max(100).default(20).describe("결과 수"),
 })
 
@@ -20,9 +21,14 @@ export async function searchFireAdminRules(
   let rules = toArray<any>(parsed?.AdmRulSearch?.admrul)
   let byText = false
   if (rules.length === 0) {
-    // 규칙 "이름"에 없으면 본문 검색으로 폴백
-    parsed = await client.search("admrul", args.query, { display: String(args.display), search: "2" })
-    rules = toArray<any>(parsed?.AdmRulSearch?.admrul)
+    // 규칙 "이름"에 없으면 본문 검색으로 폴백 — 가나다순뿐이라 전량 받아 소방 관련도순으로 재정렬
+    parsed = await client.search("admrul", args.query, { display: "100", search: "2" })
+    rules = rankBodySearch(
+      toArray<any>(parsed?.AdmRulSearch?.admrul),
+      args.query,
+      (r) => ({ title: String(r.행정규칙명 ?? ""), dept: String(r.소관부처명 ?? "") }),
+      ["소방청", "국립소방연구원"]
+    ).slice(0, args.display)
     byText = true
   }
   if (rules.length === 0) {
@@ -34,8 +40,9 @@ export async function searchFireAdminRules(
     (r, i) =>
       `${i + 1}. ${r.행정규칙명} [ID:${r.행정규칙일련번호 ?? "-"}] [${r.행정규칙종류 ?? "-"}] 소관:${r.소관부처명 ?? "-"} 발령:${r.발령일자 ?? "-"}`
   )
+  const total = Number(parsed?.AdmRulSearch?.totalCnt) || rules.length
   const head = byText
-    ? `행정규칙 검색 — "${args.query}" 이름 일치 없음 → 본문 검색 (${rules.length}건)`
+    ? `행정규칙 검색 — "${args.query}" 이름 일치 없음 → 본문 검색 (총 ${total}건 중 관련도순 ${rules.length}건)`
     : `행정규칙 검색 — "${args.query}" (${rules.length}건)`
   return textResult(`${head}\n${lines.join("\n")}\n💡 원문 조회: get_fire_admin_rule_text(ruleName 또는 id)`)
 }

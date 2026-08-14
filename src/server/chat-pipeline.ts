@@ -83,20 +83,15 @@ async function retrieve(routes: RoutedQuery[], clients: Clients): Promise<Retrie
   return { text, used: oks.map((r) => r.route.tool), failed: fails.map((f) => f.route.tool) }
 }
 
-/** 답변의 각 문장이 실존하는 자료 번호를 1개 이상 인용해야 통과한다. */
+/**
+ * 실존 자료 번호 인용이 1개 이상 있고 존재하지 않는 번호 인용이 없으면 통과한다.
+ * (문장 단위 전수 검증은 실모델이 형식을 지키지 못해 답변 전량이 폐기되는 병목이었음 — 기준.md)
+ */
 function citedAnswer(raw: string, sourceCount: number): string | null {
   const answer = raw.trim()
   if (!answer) return null
-  const sentences = answer
-    .split(/\n+/)
-    .flatMap((line) => line.match(/[^.!?。！？]+(?:[.!?。！？]+(?=\s|$)|$)/g) ?? [])
-    .map((sentence) => sentence.trim())
-    .filter(Boolean)
-  if (sentences.length === 0) return null
-  for (const sentence of sentences) {
-    const cited = [...sentence.matchAll(/\[자료 (\d+)\]/g)].map((m) => Number(m[1]))
-    if (cited.length === 0 || cited.some((n) => n < 1 || n > sourceCount)) return null
-  }
+  const cited = [...answer.matchAll(/\[자료 (\d+)\]/g)].map((m) => Number(m[1]))
+  if (cited.length === 0 || cited.some((n) => n < 1 || n > sourceCount)) return null
   return answer
 }
 

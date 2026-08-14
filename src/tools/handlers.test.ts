@@ -268,6 +268,31 @@ describe("의도: 내용 질문도 답이 나온다 (본문검색 폴백)", () =
     expect(client.search.mock.calls[1][2].search).toBe("2")
     expect(result.content[0].text).toContain("본문 검색")
   })
+
+  it("본문검색 폴백은 가나다순 무관 규정보다 소방 소관·제목 일치를 앞세운다", async () => {
+    const client = {
+      search: vi
+        .fn()
+        .mockResolvedValueOnce({ AdmRulSearch: {} })
+        .mockResolvedValueOnce({
+          AdmRulSearch: {
+            totalCnt: "83",
+            admrul: [
+              { 행정규칙명: "(경찰청) 유치장 설계 표준 규칙", 소관부처명: "경찰청" },
+              { 행정규칙명: "제연설비의 화재안전성능기준(NFPC 501)", 소관부처명: "소방청" },
+              { 행정규칙명: "피난기구의 화재안전기술기준(NFTC 301)", 소관부처명: "국립소방연구원" },
+            ],
+          },
+        }),
+    } as any
+    const result = await searchFireAdminRules(client, { query: "방화문", display: 2 })
+    const text = result.content[0].text
+    expect(client.search.mock.calls[1][2].display).toBe("100") // 재정렬 위해 전량 요청
+    expect(text).toContain("총 83건 중 관련도순 2건")
+    expect(text).toContain("NFPC 501")
+    expect(text).toContain("NFTC 301")
+    expect(text).not.toContain("유치장") // 무관 부처는 표시 건수 밖으로 밀린다
+  })
 })
 
 describe("위험물 도구 — 목록 매칭 + 상세 조회", () => {

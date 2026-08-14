@@ -120,17 +120,16 @@ describe("chat-pipeline — 무조건 조회 구조", () => {
     expect(result.answer).toContain("소방기본법")
   })
 
-  it("일부 문장에만 인용한 답변은 전체를 폐기하고 공식 원문으로 폴백한다", async () => {
+  it("일부 문장에만 인용한 답변도 유효 인용이 1개 이상이면 채택한다", async () => {
     const fake: LlmAdapter = {
       name: "fake",
       generate: async (system) => system.includes("계획기")
         ? singlePlan
-        : "근거 없는 추가 주장입니다. 소방기본법 검색 결과가 있습니다 [자료 1].",
+        : "부연 설명입니다. 소방기본법 검색 결과가 있습니다 [자료 1].",
     }
     const result = await handleChat("소방기본법 검색", createClients(), fake)
-    expect(result.mode).toBe("lookup")
-    expect(result.answer).not.toContain("근거 없는 추가 주장")
-    expect(result.answer).toContain("소방기본법")
+    expect(result.mode).toBe("llm")
+    expect(result.answer).toContain("[자료 1]")
   })
 
   it("긴 복수 조회도 모든 자료 번호와 본문을 LLM에 전달한다", async () => {

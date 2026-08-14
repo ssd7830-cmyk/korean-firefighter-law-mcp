@@ -4,6 +4,7 @@ import { FIRE_LAWS, joLabel, resolveFireLawAlias, toJoCode } from "../lib/search
 import { toArray } from "../lib/xml.js"
 import { truncate } from "../lib/format.js"
 import { emptyResult, textResult, type ToolResult } from "../lib/errors.js"
+import { rankBodySearch } from "../lib/relevance.js"
 
 export const SearchFireLawSchema = z.object({
   query: z
@@ -29,8 +30,14 @@ export async function searchFireLaw(client: LawApiClient, args: SearchFireLawInp
   let byText = false
   if (laws.length === 0) {
     // 법령 "이름"에 없으면 조문 본문 검색으로 폴백 ("방화문 설치 기준" 같은 내용 질문)
-    parsed = await client.search("law", query, { display: String(args.display), search: "2" })
-    laws = toArray<any>(parsed?.LawSearch?.law)
+    // 가나다순뿐이라 전량 받아 소방·건축 소관 우선으로 재정렬
+    parsed = await client.search("law", query, { display: "100", search: "2" })
+    laws = rankBodySearch(
+      toArray<any>(parsed?.LawSearch?.law),
+      query,
+      (l) => ({ title: String(l.법령명한글 ?? ""), dept: String(l.소관부처명 ?? "") }),
+      ["소방청", "국토교통부"]
+    ).slice(0, args.display)
     byText = true
   }
   if (laws.length === 0) {
@@ -40,8 +47,9 @@ export async function searchFireLaw(client: LawApiClient, args: SearchFireLawInp
     (l, i) =>
       `${i + 1}. ${l.법령명한글} [MST:${l.법령일련번호}] 소관:${l.소관부처명 ?? "-"} 시행:${l.시행일자 ?? "-"}`
   )
+  const total = Number(parsed?.LawSearch?.totalCnt) || laws.length
   const head = byText
-    ? `법령 검색 — "${query}" 이름 일치 없음 → 조문 내용 검색 (${laws.length}건)`
+    ? `법령 검색 — "${query}" 이름 일치 없음 → 조문 내용 검색 (총 ${total}건 중 관련도순 ${laws.length}건)`
     : `법령 검색 — "${query}" (${laws.length}건)`
   return textResult(`${head}\n${lines.join("\n")}\n💡 조문 조회: get_fire_law_text(lawName 또는 mst)`)
 }
