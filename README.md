@@ -30,6 +30,37 @@ LLM이 질문을 공식 API 호출 계획(1~4건)으로 바꾸고 조회 자료�
 프로그램은 stdio MCP 도구로 공식 API를 조회합니다. ChatGPT는 로컬 MCP 서버에 직접 연결하지 않으므로
 ChatGPT를 사용할 때는 기관 서버형의 원격 MCP 또는 웹/API 방식을 검토해야 합니다.
 
+### 설치 방법 두 가지
+
+이 프로그램은 npm에 게시되어 있어 내려받기·빌드 없이 바로 실행할 수 있습니다.
+
+```bash
+npx korean-firefighter-law-mcp
+```
+
+AI 클라이언트의 MCP 설정에도 같은 방식으로 등록합니다. 경로를 지정할 필요가 없습니다.
+
+```json
+{
+  "mcpServers": {
+    "firefighter-law": {
+      "command": "npx",
+      "args": ["-y", "korean-firefighter-law-mcp"],
+      "env": {
+        "DATA_GO_KR_KEY": "발급받은 키",
+        "LAW_OC": "발급받은 OC"
+      }
+    }
+  }
+}
+```
+
+코드를 직접 검토하거나 수정해서 운영하려면 저장소를 내려받아 빌드합니다. 기관 심사·내부 배포에는
+이 방식을 권합니다. 절차는 [LOCAL_SETUP.md](LOCAL_SETUP.md)와 [DEPLOY.md](DEPLOY.md)에 있습니다.
+
+[MCP 공식 레지스트리](https://registry.modelcontextprotocol.io)에는
+`io.github.ssd7830-cmyk/korean-firefighter-law-mcp`로 등재되어 있습니다.
+
 ## 제공 도구 11개
 
 | 도구 | 범위 | 공식 데이터 출처 |
