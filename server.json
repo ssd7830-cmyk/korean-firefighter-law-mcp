@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ssd7830-cmyk/korean-firefighter-law-mcp",
+  "title": "Korean Fire Safety Law & Statistics",
+  "description": "Korean fire safety law, statutes, NFPC/NFTC codes, hazmat, and fire/EMS statistics.",
+  "repository": {
+    "url": "https://github.com/ssd7830-cmyk/korean-firefighter-law-mcp",
+    "source": "github"
+  },
+  "version": "0.8.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "korean-firefighter-law-mcp",
+      "version": "0.8.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DATA_GO_KR_KEY",
+          "description": "Service key from data.go.kr (Korean public data portal). Required for National Fire Agency APIs: fire status, EMS statistics, fire-safety buildings, facilities, and hazardous materials.",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "LAW_OC",
+          "description": "OC identifier from open.law.go.kr (Korean Ministry of Government Legislation). Required for statutes, annexes, precedents, and administrative rules.",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
