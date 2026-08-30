@@ -372,6 +372,46 @@ describe("createLlmAdapter — provider 선택", () => {
     vi.unstubAllGlobals()
   })
 
+  it("gemini 401은 키 확인 안내와 공급자 원문을 함께 준다", async () => {
+    process.env.GEMINI_API_KEY = "wrong"
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 401, message: "API key not valid. Please pass a valid API key.", status: "UNAUTHENTICATED" } }),
+      { status: 401 })))
+    await expect(createLlmAdapter()!.generate("s", "u")).rejects.toThrow(
+      /GEMINI_API_KEY 값이 잘못되었거나.*API key not valid/s
+    )
+    vi.unstubAllGlobals()
+  })
+
+  it("openai 404는 LLM_MODEL로 모델을 지정하라고 안내한다", async () => {
+    process.env.OPENAI_API_KEY = "o"
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: { message: "The model 'x' does not exist.", code: "model_not_found" } }),
+      { status: 404 })))
+    await expect(createLlmAdapter()!.generate("s", "u")).rejects.toThrow(
+      /LLM_MODEL 환경변수로.*does not exist/s
+    )
+    vi.unstubAllGlobals()
+  })
+
+  it("429는 한도 초과로 안내한다", async () => {
+    process.env.OPENAI_API_KEY = "o"
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limited", { status: 429 })))
+    await expect(createLlmAdapter()!.generate("s", "u")).rejects.toThrow(/요청 한도를 초과/)
+    vi.unstubAllGlobals()
+  })
+
+  it("오류 본문에 되비친 키는 마스킹한다", async () => {
+    process.env.OPENAI_API_KEY = "o"
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: { message: "Incorrect API key provided: sk-ant-abcdefghijklmnop." } }),
+      { status: 401 })))
+    const err = await createLlmAdapter()!.generate("s", "u").catch((e: Error) => e)
+    expect(String(err)).toContain("***")
+    expect(String(err)).not.toContain("abcdefghijklmnop")
+    vi.unstubAllGlobals()
+  })
+
   it("openai 어댑터는 Responses API와 현행 기본 모델을 사용한다", async () => {
     process.env.OPENAI_API_KEY = "o"
     vi.stubGlobal(
